@@ -157,10 +157,31 @@ method_registration_template = string.Template('''
   },
 ''')
 
-method_def_template = string.Template('''
+type_method_def_template = string.Template('''
 static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
 {
-  return 0;
+  if( !self->p )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "${rt_type}.${method_name}() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+                                                                                 
+  RTresult res = ${optix_func_name}( self->p );                                              
+  if( res != RT_SUCCESS )                                                        
+  {                                                                              
+    const char* optix_err_str = 0;                                                     
+    char  err_str[512];                                                          
+    RTcontext ctx;                                                               
+    rt${rt_type}GetContext( self->p, &ctx );                                          
+    rtContextGetErrorString( ctx, res, &optix_err_str );                                     
+    
+    snprintf( err_str, 512, "${rt_type}.${method_name}() failed with error '%s'", optix_err_str );
+    PyErr_SetString( PyExc_RuntimeError, err_str );                              
+    return 0;                                                                    
+  }                                                                              
+                                                                                 
+  return 0;              
+
 }
 ''')
 
@@ -172,6 +193,9 @@ file_template = string.Template( '''
 
 #include <Python.h>
 #include <optix_host.h>
+
+#include <stdio.h>
+
 
 ${types}
 
@@ -292,22 +316,31 @@ def parse_funcs():
     return funcs
 
 
+
+
+def create_method_code( rt_type, method_name, func ):
+    ( ret, funcname, params ) = func 
+
+    return type_method_def_template.substitute( 
+            rt_type=rt_type,
+            method_name=method_name,
+            optix_func_name=funcname
+            )
+
+
 def create_type_method( rt_type, func ):
+    # keith
     
-    method_name= rt_funcname_to_methodname( rt_type, func[1] )
+    method_name = rt_funcname_to_methodname( rt_type, func[1] )
     method_registration = method_registration_template.substitute( 
             rt_type=rt_type,
             method_name=method_name
             )
-    method = method_def_template.substitute( 
-            rt_type=rt_type,
-            method_name=method_name
-            )
+    method = create_method_code( rt_type, method_name, func )
     return ( method_registration, method )
 
 
 def get_type_creaters( rt_type, func_decls, context_func_decls ):
-    # keith
     for func in func_decls:
         if is_create_method( func[1] ):
             func_decls.remove( func )
