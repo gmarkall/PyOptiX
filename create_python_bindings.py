@@ -165,8 +165,10 @@ static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
     PyErr_SetString( PyExc_RuntimeError, "${rt_type}.${method_name}() called on uninitialized object" );
     return 0;                                                                    
   }                                                                              
+
+  ${arg_parsing}
                                                                                  
-  RTresult res = ${optix_func_name}( self->p );                                              
+  RTresult res = ${optix_func_name}( $(args}  );                                              
   if( res != RT_SUCCESS )                                                        
   {                                                                              
     const char* optix_err_str = 0;                                                     
@@ -320,6 +322,12 @@ def parse_funcs():
 
 def create_method_code( rt_type, method_name, func ):
     ( ret, funcname, params ) = func 
+
+    format_string = ''
+    arg_decls = ''
+
+    for param in params:
+        arg_decls += param
 
     return type_method_def_template.substitute( 
             rt_type=rt_type,
