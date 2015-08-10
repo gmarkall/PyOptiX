@@ -1,9 +1,9 @@
 
 all: optix
 
-optixmodule: optixmodule.c
-	#./create_python_bindings.py /Users/keith/Code/rtsdk/rtmain/include/ > optixmodule.c
-	/usr/bin/python create_python_bindings.py /Users/kmorley/Code/rtsdk/rtmain/include/ > optixmodule.c
+optixmodule:
+	/usr/bin/python create_python_bindings.py /Users/keith/Code/rtsdk/rtmain/include/ > optixmodule.c
+	#/usr/bin/python create_python_bindings.py /Users/kmorley/Code/rtsdk/rtmain/include/ > optixmodule.c
 
 optix: optixmodule setup.py
 	/usr/bin/python setup.py build

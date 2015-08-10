@@ -55,13 +55,6 @@ type_template = string.Template( '''
  *
 \******************************************************************************/
 
-typedef struct 
-{
-    PyObject_HEAD
-    ${opaque_type} p;
-} ${rt_type};
-
-
 static void ${rt_type}_dealloc( ${rt_type}* self )
 {
   self->ob_type->tp_free((PyObject*)self);
@@ -166,9 +159,9 @@ static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
     return 0;                                                                    
   }                                                                              
 
-  ${arg_parsing}
+${arg_parsing}
                                                                                  
-  RTresult res = ${optix_func_name}( $(args}  );                                              
+  RTresult res = ${optix_func_name}( ${args} );
   if( res != RT_SUCCESS )                                                        
   {                                                                              
     const char* optix_err_str = 0;                                                     
@@ -181,6 +174,25 @@ static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
     PyErr_SetString( PyExc_RuntimeError, err_str );                              
     return 0;                                                                    
   }                                                                              
+                                                                                 
+  return 0;              
+
+}
+''')
+
+
+type_method_def_no_res_template = string.Template('''
+static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
+{
+  if( !self->p )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "${rt_type}.${method_name}() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+
+${arg_parsing}
+                                                                                 
+  ${optix_func_name}( ${args} );
                                                                                  
   return 0;              
 
@@ -239,8 +251,12 @@ def strip_rt_prefix( rt_type, rt_func ):
 
 
 def rt_funcname_to_methodname( rt_type, rt_func ):
-    name = strip_rt_prefix( rt_type, rt_func )
-    return str( name[0] ).lower() + name[1:]
+    if rt_func.startswith( get_rt_prefix( rt_type ) ):
+        name = strip_rt_prefix( rt_type, rt_func )
+        return str( name[0] ).lower() + name[1:]
+    else:
+        name = rt_func[2:]
+        return str( name[0] ).lower() + name[1:]
 
 
 def parseFunctionPrototype( line ):
@@ -258,6 +274,9 @@ def parseFunctionPrototype( line ):
         if tt in funcname:
             rt_type = t
             break
+
+    if funcname == 'rtRemoteDeviceCreate' or funcname == 'rtContextCreate':
+        rt_type = None
 
     params = back.split( ',' )
     params = [ x.split() for x in params ]
@@ -306,6 +325,7 @@ def parse_funcs():
             }
 
     with open( os.path.join( sys.argv[1], 'optix_host.h' ) ) as  optix_header:
+        ignore_re = re.compile( 'rtVariableSet[1-4][a-z][a-z]?v|rtVariableGet[1-4][a-z][a-z]?v' )
         for line in optix_header:
             line = line.strip()
             if line and line[0] == '#':
@@ -313,27 +333,142 @@ def parse_funcs():
             tokens = line.split()
             if len( tokens ) >= 3 and tokens[1] == 'RTAPI':
                 (rt_object, ret, funcname, params ) = parseFunctionPrototype( line )
+                if ignore_re.match( funcname ):
+                    #print '>>>>>> ignoring {}'.format( funcname )
+                    continue
+
                 funcs[ rt_object ].append( (ret, funcname, params ) )
 
     return funcs
 
 
 
+C_to_Py = {
+        'float'                     : ( 'float'             , 'f' ,  '=0.0f'       , '{}'   ),
+        'float*'                    : ( 'float'             , ''  ,  '=0.0f'       , '&{}'   ),
+        'const float*'              : ( 'const float'       , 'O' ,  '[16]={0.0f}' , '{}'   ),
+        'const float**'             : ( 'const float*'      , ''  ,  '[16]={0.0f}' , '&{}'   ),
+        'double'                    : ( 'double'            , 'd' ,  '=0.0'        , '{}'   ),
+        'double*'                   : ( 'double'            , ''  ,  '=0.0'        , '&{}'   ),
+        'int'                       : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'int*'                      : ( 'int'               , ''  ,  '=0'          , '&{}'   ),
+        'const int*'                : ( 'int'               , 'i' ,  '[16]={0}'    , '{}'   ),
+        'unsigned int'              : ( 'unsigned int'      , 'I' ,  '=0u'         , '{}'   ),
+        'unsigned int*'             : ( 'unsigned int'      , ''  ,  '=0u'         , '&{}'   ),
+        'const char*'               : ( 'const char*'       , 's' ,  '=0'          , '{}'   ),
+        'const char**'              : ( 'const char*'       , ''  ,  '=0'          , '&{}'   ),
+        'void*'                     : ( 'void*'             , 'i' ,  '=0'          , '{}'   ),
+        'const void*'               : ( 'const char'        , 'O' ,  '[1024]={0}'  , '{}'   ),
+        'void**'                    : ( 'void*'             , ''  ,  '=0'          , '&{}'   ),
+        'RTsize'                    : ( 'RTsize'            , 'n' ,  '=0'          , '{}'   ),
+        'RTsize*'                   : ( 'RTsize'            , ''  ,  '=0'          , '&{}'   ),
+        'const RTsize*'             : ( 'RTsize'            , ''  ,  '[3]={0ull}'  , '{}'   ),
+        'RTtimeoutcallback'         : ( 'RTtimeoutcallback' , 'O' ,  '=0'          , '{}'   ),
+        'RTformat'                  : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTformat*'                 : ( 'RTformat'          , ''  ,  '=0'          , '&{}'   ),
+        'RTobjecttype'              : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTobjecttype*'             : ( 'RTobjecttype'      , ''  ,  '=0'          , '&{}'   ),
+        'RTwrapmode'                : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTwrapmode*'               : ( 'RTwrapmode'        , ''  ,  '=0'          , '&{}'   ),
+        'RTfiltermode'              : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTfiltermode*'             : ( 'RTfiltermode'      , ''  ,  '=0'          , '&{}'   ),
+        'RTtexturereadmode'         : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTtexturereadmode*'        : ( 'RTtexturereadmode' , ''  ,  '=0'          , '&{}'   ),
+        'RTtextureindexmode'        : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTtextureindexmode*'       : ( 'RTtextureindexmode', ''  ,  '=0'          , '&{}'   ),
+        'RTexception'               : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTresult'                  : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTdeviceattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTremotedeviceattribute'   : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTremotedevicestatus'      : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTcontextattribute'        : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTbufferattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTbufferidnull'            : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTprogramidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTtextureidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
+        'RTvariable'                : ( 'Variable'          , 'O!', '={0}'        , '{}.p'   ),
+        'RTvariable*'               : ( 'RTvariable'        , ''  , '=0'          , '&{}'   ),
+        'RTacceleration'            : ( 'Acceleration'      , 'O!', '={0}'        , '{}.p'   ),
+        'RTacceleration*'           : ( 'RTacceleration'    , ''  , '=0'          , '&{}'   ),
+        'RTbuffer'                  : ( 'Buffer'            , 'O!', '={0}'        , '{}.p'   ),
+        'RTbuffer*'                 : ( 'RTbuffer'          , ''  , '=0'          , '&{}'   ),
+        'RTgeometrygroup'           : ( 'GeometryGroup'     , 'O!', '={0}'        , '{}.p'   ),
+        'RTgeometrygroup*'          : ( 'RTgeometrygroup'   , ''  , '=0'          , '&{}'   ),
+        'RTgeometryinstance'        : ( 'GeometryInstance'  , 'O!', '={0}'        , '{}.p'   ),
+        'RTgeometryinstance*'       : ( 'RTgeometryinstance', ''  , '=0'          , '&{}'   ),
+        'RTgeometry'                : ( 'Geometry'          , 'O!', '={0}'        , '{}.p'   ),
+        'RTgeometry*'               : ( 'RTgeometry'        , ''  , '=0'          , '&{}'   ),
+        'RTgroup'                   : ( 'Group'             , 'O!', '={0}'        , '{}.p'   ),
+        'RTgroup*'                  : ( 'RTgroup'           , ''  , '=0'          , '&{}'   ),
+        'RTmaterial'                : ( 'Material'          , 'O!', '={0}'        , '{}.p'   ),
+        'RTmaterial*'               : ( 'RTmaterial'        , ''  , '=0'          , '&{}'   ),
+        'RTprogram'                 : ( 'Program'           , 'O!', '={0}'        , '{}.p'   ),
+        'RTprogram*'                : ( 'RTprogram'         , ''  , '=0'          , '&{}'   ),
+        'RTobject'                  : ( 'Program'           , 'O' , '={0}'       , '(void*)&{}'   ),
+        'RTobject*'                 : ( 'RTobject'          , 'O' , '={0}'       , '&{}'   ),
+        'RTremotedevice'            : ( 'RemoteDevice'      , 'O!', '={0}'        , '{}.p'   ),
+        'RTremotedevice*'           : ( 'RTremotedevice'    , ''  , '=0'          , '&{}'   ),
+        'RTselector'                : ( 'Selector'          , 'O!', '={0}'        , '{}.p'   ),
+        'RTselector*'               : ( 'RTselector'        , ''  , '=0'          , '&{}'   ),
+        'RTtexturesampler'          : ( 'TextureSampler'    , 'O!', '={0}'        , '{}.p'   ),
+        'RTtexturesampler*'         : ( 'RTtexturesampler'  , ''  , '=0'          , '&{}'   ),
+        'RTtransform'               : ( 'Transform'         , 'O!', '={0}'        , '{}.p'   ),
+        'RTtransform*'              : ( 'RTtransform'       , ''  , '=0'          , '&{}'   ),
+        'RTcontext'                 : ( 'Context'           , 'O!', '={0}'        , '{}.p'   ),
+        'RTcontext*'                : ( 'RTcontext'         , ''  , '=0'          , '&{}'   ),
+        }
+
+
+def is_output_param( param ):
+    ptype = param[0]
+    if ptype == 'char*' or ptype == 'const char*' or ptype == 'const float*' or ptype == 'const void*':
+        return False
+    return ptype[-1] == '*'
+
+
+def do_error_checking( rt_type, method_name ):
+    if rt_type == 'Context':
+        return False
+    if rt_type == 'RemoteDevice':
+        return False
+    return True
 
 def create_method_code( rt_type, method_name, func ):
     ( ret, funcname, params ) = func 
 
     format_string = ''
     arg_decls = ''
+    args = [ 'self->p' ] if rt_type else [] 
 
-    for param in params:
-        arg_decls += param
+    #print params
+    #print params[1 if rt_type else 0:]
+    #for param in params:
+    for param in params[1 if rt_type else 0:]:
+        if param[0] not in C_to_Py:
+            print >> sys.stderr, '*************NOT FOUND \'{}\''.format( param[0] )
 
-    return type_method_def_template.substitute( 
-            rt_type=rt_type,
-            method_name=method_name,
-            optix_func_name=funcname
-            )
+        ( param_type, param_format_str, param_init, arg_decorator ) = C_to_Py[ param[0] ]
+        arg_decls += '  {} {}{};\n'.format( param_type, param[1], param_init )
+        args.append( arg_decorator.format( param[1] ) )
+    args = ', '.join( args )
+
+    if do_error_checking( rt_type, method_name ):
+        return type_method_def_template.substitute( 
+                rt_type         = rt_type,
+                method_name     = method_name,
+                optix_func_name = funcname,
+                arg_parsing     = arg_decls, 
+                args            = args 
+                )
+    else:
+        return type_method_def_no_res_template.substitute( 
+                rt_type         = rt_type,
+                method_name     = method_name,
+                optix_func_name = funcname,
+                arg_parsing     = arg_decls, 
+                args            = args 
+                )
+
 
 
 def create_type_method( rt_type, func ):
@@ -349,15 +484,15 @@ def create_type_method( rt_type, func ):
 
 
 def get_type_creaters( rt_type, func_decls, context_func_decls ):
-    for func in func_decls:
+    for func in func_decls[:]:
         if is_create_method( func[1] ):
             func_decls.remove( func )
 
-            new_funcname = 'rtContextCreate{}{}'.format(
-                    rt_type,
-                    func[1][ len( get_rt_prefix( rt_type )+'Create' ): ]
-                    )
-            print >> sys.stderr, '{} : {}'.format( func[1], new_funcname )
+            new_funcname = func[1] 
+            #new_funcname = 'rtContextCreate{}{}'.format(
+            #        rt_type,
+            #        func[1][ len( get_rt_prefix( rt_type )+'Create' ): ]
+            #        )
             context_func_decls.append( (func[0], new_funcname, func[2] ) )
 
 
@@ -365,18 +500,12 @@ def create_type_methods( rt_type, func_decls, context_func_decls ):
     if rt_type != 'Context' :
         get_type_creaters( rt_type, func_decls, context_func_decls)
         
-    for func_decl in func_decls:
-        print >> sys.stderr, func_decl
-
     type_methods = ''
     method_registrations = ''
     for func in func_decls:
         ( method_registration, method ) = create_type_method( rt_type, func )
         type_methods += method
         method_registrations += method_registration
-
-    print >> sys.stderr, type_methods
-    print >> sys.stderr, method_registrations
 
     type_methods += methods_struct_template.substitute( 
         rt_type=rt_type, 
@@ -387,6 +516,11 @@ def create_type_methods( rt_type, func_decls, context_func_decls ):
 
 def create_types( funcs ):    
     types = ''
+    for rt_type in rt_types:
+        types += type_declare_template.substitute(  
+                rt_type         = rt_type,
+                opaque_type     = get_opaque_type( rt_type ),
+                )
     for rt_type in rt_types:
         rt_type_methods = create_type_methods( rt_type, funcs[rt_type], funcs['Context'])
         types += type_template.substitute( 
