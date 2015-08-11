@@ -141,6 +141,7 @@ static PyMethodDef ${rt_type}_methods[] =
 ''')
 
 
+
 method_registration_template = string.Template('''
   {
     "${method_name}",
@@ -199,6 +200,18 @@ ${arg_parsing}
 }
 ''')
 
+method_def= string.Template('''
+static PyObject* optix_${method_name}( PyObject* self, PyObject* args )
+{
+${arg_parsing}
+                                                                                 
+  ${optix_func_name}( ${args} );
+                                                                                 
+  return 0;              
+
+}
+''')
+
 
 file_template = string.Template( '''
 /*
@@ -217,7 +230,7 @@ ${module_methods}
 
 void initoptix()
 {
-  PyObject* mod = Py_InitModule("optix", optixMethods);
+  PyObject* mod = Py_InitModule("optix", optix_methods);
 
 ${type_registrations}
 
@@ -251,7 +264,7 @@ def strip_rt_prefix( rt_type, rt_func ):
 
 
 def rt_funcname_to_methodname( rt_type, rt_func ):
-    if rt_func.startswith( get_rt_prefix( rt_type ) ):
+    if rt_type and rt_func.startswith( get_rt_prefix( rt_type ) ):
         name = strip_rt_prefix( rt_type, rt_func )
         return str( name[0] ).lower() + name[1:]
     else:
@@ -433,6 +446,7 @@ def do_error_checking( rt_type, method_name ):
         return False
     return True
 
+
 def create_method_code( rt_type, method_name, func ):
     ( ret, funcname, params ) = func 
 
@@ -452,7 +466,16 @@ def create_method_code( rt_type, method_name, func ):
         args.append( arg_decorator.format( param[1] ) )
     args = ', '.join( args )
 
-    if do_error_checking( rt_type, method_name ):
+    if not rt_type:
+        return method_def.substitute( 
+                rt_type         = rt_type,
+                method_name     = method_name,
+                optix_func_name = funcname,
+                arg_parsing     = arg_decls, 
+                args            = args 
+                )
+
+    elif do_error_checking( rt_type, method_name ):
         return type_method_def_template.substitute( 
                 rt_type         = rt_type,
                 method_name     = method_name,
@@ -469,6 +492,15 @@ def create_method_code( rt_type, method_name, func ):
                 args            = args 
                 )
 
+
+def create_mod_method( func ):
+    method_name = rt_funcname_to_methodname( None, func[1] )
+    method_registration = method_registration_template.substitute( 
+            rt_type='optix',
+            method_name=method_name
+            )
+    method = create_method_code( None, method_name, func )
+    return ( method_registration, method )
 
 
 def create_type_method( rt_type, func ):
@@ -494,6 +526,24 @@ def get_type_creaters( rt_type, func_decls, context_func_decls ):
             #        func[1][ len( get_rt_prefix( rt_type )+'Create' ): ]
             #        )
             context_func_decls.append( (func[0], new_funcname, func[2] ) )
+
+
+def create_mod_methods( func_decls ):
+    type_methods = ''
+    method_registrations = ''
+    for func in func_decls:
+        ( method_registration, method ) = create_mod_method( func )
+        type_methods += method
+        method_registrations += method_registration
+
+    #print type_methods
+    #print method_registrations
+
+    type_methods += methods_struct_template.substitute( 
+        rt_type='optix', 
+        method_registrations = method_registrations 
+        )
+    return type_methods
 
 
 def create_type_methods( rt_type, func_decls, context_func_decls ):
@@ -539,12 +589,8 @@ def create_type_registrations():
 
 
 def create_module_methods( funcs ):
-    return '''
-static PyMethodDef optixMethods[] =
-  {
-     { NULL,    NULL,       0,            NULL              }
-  };
-'''
+    mod_methods = create_mod_methods( funcs )
+    return mod_methods 
 
 
 def create_enum_registrations():
