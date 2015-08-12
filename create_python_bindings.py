@@ -201,6 +201,62 @@ ${arg_parsing}
 ''')
 
 
+type_method_def_context_template = string.Template('''
+static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
+{
+  if( !self->p )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "${rt_type}.${method_name}() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+
+${arg_parsing}
+                                                                                 
+  RTresult res = ${optix_func_name}( ${args} );
+  if( res != RT_SUCCESS )                                                        
+  {                                                                              
+    const char* optix_err_str = 0;                                                     
+    char  err_str[512];                                                          
+    rtContextGetErrorString( self->p, res, &optix_err_str );                                     
+    
+    snprintf( err_str, 512, "${rt_type}.${method_name}() failed with error '%s'", optix_err_str );
+    PyErr_SetString( PyExc_RuntimeError, err_str );                              
+    return 0;                                                                    
+  }                                                                              
+
+  return Py_BuildValue( ${ret_args} );
+}
+''')
+
+
+type_method_def_remotedevice_template= string.Template('''
+static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
+{
+  if( !self->p )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "${rt_type}.${method_name}() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+
+${arg_parsing}
+                                                                                 
+  RTresult res = ${optix_func_name}( ${args} );
+  if( res != RT_SUCCESS )                                                        
+  {                                                                              
+    const char* optix_err_str = 0;                                                     
+    char  err_str[512];                                                          
+    rtContextGetErrorString( 0, res, &optix_err_str );                                     
+    
+    snprintf( err_str, 512, "${rt_type}.${method_name}() failed with error '%s'", optix_err_str );
+    PyErr_SetString( PyExc_RuntimeError, err_str );                              
+    return 0;                                                                    
+  }                                                                              
+
+  return Py_BuildValue( ${ret_args} );
+}
+''')
+
+
 type_method_def_no_res_template = string.Template('''
 static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
 {
@@ -374,49 +430,50 @@ def parse_funcs():
 
 
 
+                                    # ( param_type, param_format_str, param_init,    arg_decorator, parse_arg_decorator )
 C_to_Py = {
-        'float'                     : ( 'float'             , 'f' ,  '=0.0f'       , '{}'       ,  '{}'                         ),
+        'float'                     : ( 'float'             , 'f' ,  '=0.0f'       , '{}'       ,  '&{}'                         ),
         'float*'                    : ( 'float'             , 'f' ,  '=0.0f'       , '&{}'      ,  '{}'                        ),
         'const float*'              : ( 'const float'       , 'O' ,  '[16]={0.0f}' , '{}'       ,  '{}'                         ),
         #'const float**'             : ( 'const float*'      , ''  ,  '[16]={0.0f}' , '&{}'      ,  '&{}'                        ),
-        'double'                    : ( 'double'            , 'd' ,  '=0.0'        , '{}'       ,  '{}'                         ),
+        'double'                    : ( 'double'            , 'd' ,  '=0.0'        , '{}'       ,  '&{}'                         ),
         'double*'                   : ( 'double'            , 'd' ,  '=0.0'        , '&{}'      ,  '{}'                        ),
-        'int'                       : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'int'                       : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'int*'                      : ( 'int'               , 'i' ,  '=0'          , '&{}'      ,  '{}'                        ),
         'const int*'                : ( 'int'               , 'i' ,  '[16]={0}'    , '{}'       ,  '{}'                         ),
-        'unsigned int'              : ( 'unsigned int'      , 'I' ,  '=0u'         , '{}'       ,  '{}'                         ),
+        'unsigned int'              : ( 'unsigned int'      , 'I' ,  '=0u'         , '{}'       ,  '&{}'                         ),
         'unsigned int*'             : ( 'unsigned int'      , 'I' ,  '=0u'         , '&{}'      ,  '{}'                         ),
-        'const char*'               : ( 'const char*'       , 's' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'const char*'               : ( 'const char*'       , 's' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'const char**'              : ( 'const char*'       , 's' ,  '=0'          , '&{}'      ,  '{}'                        ),
         'void*'                     : ( 'void*'             , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
         'const void*'               : ( 'const char'        , 'O' ,  '[1024]={0}'  , '{}'       ,  '{}'                         ),
         'void**'                    : ( 'void*'             , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
-        'RTsize'                    : ( 'RTsize'            , 'n' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTsize'                    : ( 'RTsize'            , 'n' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTsize*'                   : ( 'RTsize'            , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
         'const RTsize*'             : ( 'RTsize'            , ''  ,  '[3]={0ull}'  , '{}'       ,  '{}'                         ),
         'RTtimeoutcallback'         : ( 'RTtimeoutcallback' , 'O' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTformat'                  : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTformat'                  : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTformat*'                 : ( 'RTformat'          , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
-        'RTobjecttype'              : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTobjecttype'              : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTobjecttype*'             : ( 'RTobjecttype'      , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
-        'RTwrapmode'                : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTwrapmode'                : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTwrapmode*'               : ( 'RTwrapmode'        , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
-        'RTfiltermode'              : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTfiltermode'              : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTfiltermode*'             : ( 'RTfiltermode'      , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
-        'RTtexturereadmode'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTtexturereadmode'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTtexturereadmode*'        : ( 'RTtexturereadmode' , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
-        'RTtextureindexmode'        : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTtextureindexmode'        : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTtextureindexmode*'       : ( 'RTtextureindexmode', ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
-        'RTexception'               : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTresult'                  : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTdeviceattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTremotedeviceattribute'   : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTremotedevicestatus'      : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTcontextattribute'        : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTbufferattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTbufferidnull'            : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTprogramidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
-        'RTtextureidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTexception'               : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTresult'                  : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTdeviceattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTremotedeviceattribute'   : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTremotedevicestatus'      : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTcontextattribute'        : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTbufferattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTbufferidnull'            : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTprogramidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
+        'RTtextureidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTvariable'                : ( 'Variable*'         , 'O!',  '=0'          , '{}->p'    ,  '&VariableType, &{}'         ),
         'RTvariable*'               : ( 'RTvariable'        , 'O&',  '=0'          , '&{}'      ,  'VariableNew, {}'            ),
         'RTacceleration'            : ( 'Acceleration*'     , 'O!',  '=0'          , '{}->p'    ,  '&AccelerationType, &{}'     ),
@@ -435,7 +492,7 @@ C_to_Py = {
         'RTmaterial*'               : ( 'RTmaterial'        , 'O&',  '=0'          , '&{}'      ,  'MaterialNew, {}'            ),
         'RTprogram'                 : ( 'Program*'          , 'O!',  '=0'          , '{}->p'    ,  '&ProgramType, &{}'          ),
         'RTprogram*'                : ( 'RTprogram'         , 'O&',  '=0'          , '&{}'      ,  'ProgramNew, {}'             ),
-        'RTobject'                  : ( 'Program*'          , 'O&',  '=0'          , '(void*)&{}' ,  '(void*)&{}'               ),
+        'RTobject'                  : ( 'Program*'          , 'O' ,  '=0'          , '{}->p'    ,  '&{}'                        ),
         'RTobject*'                 : ( 'RTobject'          , 'O&',  '=0'          , '&{}'      ,  '{}'                         ),
         'RTremotedevice'            : ( 'RemoteDevice*'     , 'O!',  '=0'          , '{}->p'    ,  '&RemoteDeviceType, &{}'     ),
         'RTremotedevice*'           : ( 'RTremotedevice'    , 'O&',  '=0'          , '&{}'      ,  'RemoteDeviceNew, {}'        ),
@@ -458,8 +515,8 @@ def is_output_param( param ):
 
 
 def do_error_checking( rt_type, method_name ):
-    if rt_type == 'Context':
-        return False
+    #if rt_type == 'Context':
+    #    return False
     if rt_type == 'RemoteDevice':
         return False
     return True
@@ -516,9 +573,8 @@ def create_method_code( rt_type, method_name, func ):
                 args            = args,
                 ret_args        = ret_args
                 )
-
-    elif do_error_checking( rt_type, method_name ):
-        return type_method_def_template.substitute( 
+    elif ret == 'void':
+        return type_method_def_no_res_template.substitute( 
                 rt_type         = rt_type,
                 method_name     = method_name,
                 optix_func_name = funcname,
@@ -526,8 +582,26 @@ def create_method_code( rt_type, method_name, func ):
                 args            = args,
                 ret_args        = ret_args
                 )
-    else:
-        return type_method_def_no_res_template.substitute( 
+    if rt_type == 'Context':
+        return type_method_def_context_template.substitute( 
+                rt_type         = rt_type,
+                method_name     = method_name,
+                optix_func_name = funcname,
+                arg_parsing     = arg_parsing,
+                args            = args,
+                ret_args        = ret_args
+                )
+    if rt_type == 'RemoteDevice':
+        return type_method_def_remotedevice_template.substitute( 
+                rt_type         = rt_type,
+                method_name     = method_name,
+                optix_func_name = funcname,
+                arg_parsing     = arg_parsing,
+                args            = args,
+                ret_args        = ret_args
+                )
+    else: 
+        return type_method_def_template.substitute( 
                 rt_type         = rt_type,
                 method_name     = method_name,
                 optix_func_name = funcname,
