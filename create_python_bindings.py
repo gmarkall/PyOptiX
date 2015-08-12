@@ -46,6 +46,20 @@ typedef struct
     PyObject_HEAD
     ${opaque_type} p;
 } ${rt_type};
+
+static PyTypeObject ${rt_type}Type;
+
+static PyObject* ${rt_type}New( void* p )
+{
+  ${rt_type}* self = (${rt_type}*)PyObject_New( ${rt_type}, &${rt_type}Type );
+  if( !self )
+    return 0;
+  
+  self->p = (${opaque_type})p;
+  return (PyObject*)self;
+}
+
+
 ''')
 
 type_template = string.Template( '''
@@ -151,6 +165,12 @@ method_registration_template = string.Template('''
   },
 ''')
 
+arg_parse_template = string.Template('''
+  if( !PyArg_ParseTuple( args, "${format_string}"${parse_args} ) )
+    return NULL;
+''')
+
+
 type_method_def_template = string.Template('''
 static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
 {
@@ -175,9 +195,8 @@ ${arg_parsing}
     PyErr_SetString( PyExc_RuntimeError, err_str );                              
     return 0;                                                                    
   }                                                                              
-                                                                                 
-  return 0;              
 
+  return Py_BuildValue( ${ret_args} );
 }
 ''')
 
@@ -194,9 +213,8 @@ static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
 ${arg_parsing}
                                                                                  
   ${optix_func_name}( ${args} );
-                                                                                 
-  return 0;              
 
+  return Py_BuildValue( ${ret_args} );
 }
 ''')
 
@@ -206,9 +224,8 @@ static PyObject* optix_${method_name}( PyObject* self, PyObject* args )
 ${arg_parsing}
                                                                                  
   ${optix_func_name}( ${args} );
-                                                                                 
-  return 0;              
 
+  return Py_BuildValue( ${ret_args} );
 }
 ''')
 
@@ -220,6 +237,7 @@ file_template = string.Template( '''
 
 #include <Python.h>
 #include <optix_host.h>
+#include <numpy/arrayobject.h>
 
 #include <stdio.h>
 
@@ -357,78 +375,78 @@ def parse_funcs():
 
 
 C_to_Py = {
-        'float'                     : ( 'float'             , 'f' ,  '=0.0f'       , '{}'   ),
-        'float*'                    : ( 'float'             , ''  ,  '=0.0f'       , '&{}'   ),
-        'const float*'              : ( 'const float'       , 'O' ,  '[16]={0.0f}' , '{}'   ),
-        'const float**'             : ( 'const float*'      , ''  ,  '[16]={0.0f}' , '&{}'   ),
-        'double'                    : ( 'double'            , 'd' ,  '=0.0'        , '{}'   ),
-        'double*'                   : ( 'double'            , ''  ,  '=0.0'        , '&{}'   ),
-        'int'                       : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'int*'                      : ( 'int'               , ''  ,  '=0'          , '&{}'   ),
-        'const int*'                : ( 'int'               , 'i' ,  '[16]={0}'    , '{}'   ),
-        'unsigned int'              : ( 'unsigned int'      , 'I' ,  '=0u'         , '{}'   ),
-        'unsigned int*'             : ( 'unsigned int'      , ''  ,  '=0u'         , '&{}'   ),
-        'const char*'               : ( 'const char*'       , 's' ,  '=0'          , '{}'   ),
-        'const char**'              : ( 'const char*'       , ''  ,  '=0'          , '&{}'   ),
-        'void*'                     : ( 'void*'             , 'i' ,  '=0'          , '{}'   ),
-        'const void*'               : ( 'const char'        , 'O' ,  '[1024]={0}'  , '{}'   ),
-        'void**'                    : ( 'void*'             , ''  ,  '=0'          , '&{}'   ),
-        'RTsize'                    : ( 'RTsize'            , 'n' ,  '=0'          , '{}'   ),
-        'RTsize*'                   : ( 'RTsize'            , ''  ,  '=0'          , '&{}'   ),
-        'const RTsize*'             : ( 'RTsize'            , ''  ,  '[3]={0ull}'  , '{}'   ),
-        'RTtimeoutcallback'         : ( 'RTtimeoutcallback' , 'O' ,  '=0'          , '{}'   ),
-        'RTformat'                  : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTformat*'                 : ( 'RTformat'          , ''  ,  '=0'          , '&{}'   ),
-        'RTobjecttype'              : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTobjecttype*'             : ( 'RTobjecttype'      , ''  ,  '=0'          , '&{}'   ),
-        'RTwrapmode'                : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTwrapmode*'               : ( 'RTwrapmode'        , ''  ,  '=0'          , '&{}'   ),
-        'RTfiltermode'              : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTfiltermode*'             : ( 'RTfiltermode'      , ''  ,  '=0'          , '&{}'   ),
-        'RTtexturereadmode'         : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTtexturereadmode*'        : ( 'RTtexturereadmode' , ''  ,  '=0'          , '&{}'   ),
-        'RTtextureindexmode'        : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTtextureindexmode*'       : ( 'RTtextureindexmode', ''  ,  '=0'          , '&{}'   ),
-        'RTexception'               : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTresult'                  : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTdeviceattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTremotedeviceattribute'   : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTremotedevicestatus'      : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTcontextattribute'        : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTbufferattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTbufferidnull'            : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTprogramidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTtextureidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'   ),
-        'RTvariable'                : ( 'Variable'          , 'O!', '={0}'        , '{}.p'   ),
-        'RTvariable*'               : ( 'RTvariable'        , ''  , '=0'          , '&{}'   ),
-        'RTacceleration'            : ( 'Acceleration'      , 'O!', '={0}'        , '{}.p'   ),
-        'RTacceleration*'           : ( 'RTacceleration'    , ''  , '=0'          , '&{}'   ),
-        'RTbuffer'                  : ( 'Buffer'            , 'O!', '={0}'        , '{}.p'   ),
-        'RTbuffer*'                 : ( 'RTbuffer'          , ''  , '=0'          , '&{}'   ),
-        'RTgeometrygroup'           : ( 'GeometryGroup'     , 'O!', '={0}'        , '{}.p'   ),
-        'RTgeometrygroup*'          : ( 'RTgeometrygroup'   , ''  , '=0'          , '&{}'   ),
-        'RTgeometryinstance'        : ( 'GeometryInstance'  , 'O!', '={0}'        , '{}.p'   ),
-        'RTgeometryinstance*'       : ( 'RTgeometryinstance', ''  , '=0'          , '&{}'   ),
-        'RTgeometry'                : ( 'Geometry'          , 'O!', '={0}'        , '{}.p'   ),
-        'RTgeometry*'               : ( 'RTgeometry'        , ''  , '=0'          , '&{}'   ),
-        'RTgroup'                   : ( 'Group'             , 'O!', '={0}'        , '{}.p'   ),
-        'RTgroup*'                  : ( 'RTgroup'           , ''  , '=0'          , '&{}'   ),
-        'RTmaterial'                : ( 'Material'          , 'O!', '={0}'        , '{}.p'   ),
-        'RTmaterial*'               : ( 'RTmaterial'        , ''  , '=0'          , '&{}'   ),
-        'RTprogram'                 : ( 'Program'           , 'O!', '={0}'        , '{}.p'   ),
-        'RTprogram*'                : ( 'RTprogram'         , ''  , '=0'          , '&{}'   ),
-        'RTobject'                  : ( 'Program'           , 'O' , '={0}'       , '(void*)&{}'   ),
-        'RTobject*'                 : ( 'RTobject'          , 'O' , '={0}'       , '&{}'   ),
-        'RTremotedevice'            : ( 'RemoteDevice'      , 'O!', '={0}'        , '{}.p'   ),
-        'RTremotedevice*'           : ( 'RTremotedevice'    , ''  , '=0'          , '&{}'   ),
-        'RTselector'                : ( 'Selector'          , 'O!', '={0}'        , '{}.p'   ),
-        'RTselector*'               : ( 'RTselector'        , ''  , '=0'          , '&{}'   ),
-        'RTtexturesampler'          : ( 'TextureSampler'    , 'O!', '={0}'        , '{}.p'   ),
-        'RTtexturesampler*'         : ( 'RTtexturesampler'  , ''  , '=0'          , '&{}'   ),
-        'RTtransform'               : ( 'Transform'         , 'O!', '={0}'        , '{}.p'   ),
-        'RTtransform*'              : ( 'RTtransform'       , ''  , '=0'          , '&{}'   ),
-        'RTcontext'                 : ( 'Context'           , 'O!', '={0}'        , '{}.p'   ),
-        'RTcontext*'                : ( 'RTcontext'         , ''  , '=0'          , '&{}'   ),
+        'float'                     : ( 'float'             , 'f' ,  '=0.0f'       , '{}'       ,  '{}'                         ),
+        'float*'                    : ( 'float'             , 'f' ,  '=0.0f'       , '&{}'      ,  '{}'                        ),
+        'const float*'              : ( 'const float'       , 'O' ,  '[16]={0.0f}' , '{}'       ,  '{}'                         ),
+        #'const float**'             : ( 'const float*'      , ''  ,  '[16]={0.0f}' , '&{}'      ,  '&{}'                        ),
+        'double'                    : ( 'double'            , 'd' ,  '=0.0'        , '{}'       ,  '{}'                         ),
+        'double*'                   : ( 'double'            , 'd' ,  '=0.0'        , '&{}'      ,  '{}'                        ),
+        'int'                       : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'int*'                      : ( 'int'               , 'i' ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'const int*'                : ( 'int'               , 'i' ,  '[16]={0}'    , '{}'       ,  '{}'                         ),
+        'unsigned int'              : ( 'unsigned int'      , 'I' ,  '=0u'         , '{}'       ,  '{}'                         ),
+        'unsigned int*'             : ( 'unsigned int'      , 'I' ,  '=0u'         , '&{}'      ,  '{}'                         ),
+        'const char*'               : ( 'const char*'       , 's' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'const char**'              : ( 'const char*'       , 's' ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'void*'                     : ( 'void*'             , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'const void*'               : ( 'const char'        , 'O' ,  '[1024]={0}'  , '{}'       ,  '{}'                         ),
+        'void**'                    : ( 'void*'             , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'RTsize'                    : ( 'RTsize'            , 'n' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTsize*'                   : ( 'RTsize'            , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'const RTsize*'             : ( 'RTsize'            , ''  ,  '[3]={0ull}'  , '{}'       ,  '{}'                         ),
+        'RTtimeoutcallback'         : ( 'RTtimeoutcallback' , 'O' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTformat'                  : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTformat*'                 : ( 'RTformat'          , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'RTobjecttype'              : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTobjecttype*'             : ( 'RTobjecttype'      , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'RTwrapmode'                : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTwrapmode*'               : ( 'RTwrapmode'        , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'RTfiltermode'              : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTfiltermode*'             : ( 'RTfiltermode'      , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'RTtexturereadmode'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTtexturereadmode*'        : ( 'RTtexturereadmode' , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'RTtextureindexmode'        : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTtextureindexmode*'       : ( 'RTtextureindexmode', ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'RTexception'               : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTresult'                  : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTdeviceattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTremotedeviceattribute'   : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTremotedevicestatus'      : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTcontextattribute'        : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTbufferattribute'         : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTbufferidnull'            : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTprogramidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTtextureidnull'           : ( 'int'               , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
+        'RTvariable'                : ( 'Variable*'         , 'O!',  '=0'          , '{}->p'    ,  '&VariableType, &{}'         ),
+        'RTvariable*'               : ( 'RTvariable'        , 'O&',  '=0'          , '&{}'      ,  'VariableNew, {}'            ),
+        'RTacceleration'            : ( 'Acceleration*'     , 'O!',  '=0'          , '{}->p'    ,  '&AccelerationType, &{}'     ),
+        'RTacceleration*'           : ( 'RTacceleration'    , 'O&',  '=0'          , '&{}'      ,  'AccelerationNew, {}'        ),
+        'RTbuffer'                  : ( 'Buffer*'           , 'O!',  '=0'          , '{}->p'    ,  '&BufferType, &{}'           ),
+        'RTbuffer*'                 : ( 'RTbuffer'          , 'O&',  '=0'          , '&{}'      ,  'BufferNew, {}'              ),
+        'RTgeometrygroup'           : ( 'GeometryGroup*'    , 'O!',  '=0'          , '{}->p'    ,  '&GeometryGroupType, &{}'    ),
+        'RTgeometrygroup*'          : ( 'RTgeometrygroup'   , 'O&',  '=0'          , '&{}'      ,  'GeometryGroupNew, {}'       ),
+        'RTgeometryinstance'        : ( 'GeometryInstance*' , 'O!',  '=0'          , '{}->p'    ,  '&GeometryInstanceType, &{}' ),
+        'RTgeometryinstance*'       : ( 'RTgeometryinstance', 'O&',  '=0'          , '&{}'      ,  'GeometryInstanceNew, {}'    ),
+        'RTgeometry'                : ( 'Geometry*'         , 'O!',  '=0'          , '{}->p'    ,  '&GeometryType, &{}'         ),
+        'RTgeometry*'               : ( 'RTgeometry'        , 'O&',  '=0'          , '&{}'      ,  'GeometryNew, {}'            ),
+        'RTgroup'                   : ( 'Group*'            , 'O!',  '=0'          , '{}->p'    ,  '&GroupType, &{}'            ),
+        'RTgroup*'                  : ( 'RTgroup'           , 'O&',  '=0'          , '&{}'      ,  'GroupNew, {}'               ),
+        'RTmaterial'                : ( 'Material*'         , 'O!',  '=0'          , '{}->p'    ,  '&MaterialType, &{}'         ),
+        'RTmaterial*'               : ( 'RTmaterial'        , 'O&',  '=0'          , '&{}'      ,  'MaterialNew, {}'            ),
+        'RTprogram'                 : ( 'Program*'          , 'O!',  '=0'          , '{}->p'    ,  '&ProgramType, &{}'          ),
+        'RTprogram*'                : ( 'RTprogram'         , 'O&',  '=0'          , '&{}'      ,  'ProgramNew, {}'             ),
+        'RTobject'                  : ( 'Program*'          , 'O&',  '=0'          , '(void*)&{}' ,  '(void*)&{}'               ),
+        'RTobject*'                 : ( 'RTobject'          , 'O&',  '=0'          , '&{}'      ,  '{}'                         ),
+        'RTremotedevice'            : ( 'RemoteDevice*'     , 'O!',  '=0'          , '{}->p'    ,  '&RemoteDeviceType, &{}'     ),
+        'RTremotedevice*'           : ( 'RTremotedevice'    , 'O&',  '=0'          , '&{}'      ,  'RemoteDeviceNew, {}'        ),
+        'RTselector'                : ( 'Selector*'         , 'O!',  '=0'          , '{}->p'    ,  '&SelectorType, &{}'         ),
+        'RTselector*'               : ( 'RTselector'        , 'O&',  '=0'          , '&{}'      ,  'SelectorNew, {}'            ),
+        'RTtexturesampler'          : ( 'TextureSampler*'   , 'O!',  '=0'          , '{}->p'    ,  '&TextureSamplerType, &{}'   ),
+        'RTtexturesampler*'         : ( 'RTtexturesampler'  , 'O&',  '=0'          , '&{}'      ,  'TextureSamplerNew, {}'      ),
+        'RTtransform'               : ( 'Transform*'        , 'O!',  '=0'          , '{}->p'    ,  '&TransformType, &{}'        ),
+        'RTtransform*'              : ( 'RTtransform'       , 'O&',  '=0'          , '&{}'      ,  'TransformNew, {}'           ),
+        'RTcontext'                 : ( 'Context*'          , 'O!',  '=0'          , '{}->p'    ,  '&ContextType, &{}'          ),
+        'RTcontext*'                : ( 'RTcontext'         , 'O&',  '=0'          , '&{}'      ,  'ContextNew, {}'             ),
         }
 
 
@@ -451,8 +469,11 @@ def create_method_code( rt_type, method_name, func ):
     ( ret, funcname, params ) = func 
 
     format_string = ''
-    arg_decls = ''
+    ret_format_string = ''
+    arg_decls     = ''
+    parse_args    = [] 
     args = [ 'self->p' ] if rt_type else [] 
+    rets          = []
 
     #print params
     #print params[1 if rt_type else 0:]
@@ -461,18 +482,39 @@ def create_method_code( rt_type, method_name, func ):
         if param[0] not in C_to_Py:
             print >> sys.stderr, '*************NOT FOUND \'{}\''.format( param[0] )
 
-        ( param_type, param_format_str, param_init, arg_decorator ) = C_to_Py[ param[0] ]
+        ( param_type, param_format_str, param_init, arg_decorator, parse_arg_decorator ) = C_to_Py[ param[0] ]
         arg_decls += '  {} {}{};\n'.format( param_type, param[1], param_init )
         args.append( arg_decorator.format( param[1] ) )
+        if is_output_param( param ):
+            #rets.append( param[1] )
+            rets.append( parse_arg_decorator.format( param[1] ) )
+            ret_format_string += param_format_str 
+        else:
+            parse_args.append( parse_arg_decorator.format( param[1] ) )
+            format_string += param_format_str
+
     args = ', '.join( args )
+    parse_args = ', '.join( parse_args )
+    arg_parse = arg_parse_template.substitute(
+            format_string = format_string,
+            parse_args    = ', ' + parse_args if parse_args else ''
+            )
+    arg_parsing = arg_decls + arg_parse
+
+    if not rets:
+        ret_args = '""'
+    else:
+        ret_args = '"{}"{}'.format( ret_format_string, '' if not rets else ', ' + ', '.join( rets ) ) 
+        rets = '  ;'.format( rets[0] )
 
     if not rt_type:
         return method_def.substitute( 
                 rt_type         = rt_type,
                 method_name     = method_name,
                 optix_func_name = funcname,
-                arg_parsing     = arg_decls, 
-                args            = args 
+                arg_parsing     = arg_parsing,
+                args            = args,
+                ret_args        = ret_args
                 )
 
     elif do_error_checking( rt_type, method_name ):
@@ -480,16 +522,18 @@ def create_method_code( rt_type, method_name, func ):
                 rt_type         = rt_type,
                 method_name     = method_name,
                 optix_func_name = funcname,
-                arg_parsing     = arg_decls, 
-                args            = args 
+                arg_parsing     = arg_parsing,
+                args            = args,
+                ret_args        = ret_args
                 )
     else:
         return type_method_def_no_res_template.substitute( 
                 rt_type         = rt_type,
                 method_name     = method_name,
                 optix_func_name = funcname,
-                arg_parsing     = arg_decls, 
-                args            = args 
+                arg_parsing     = arg_parsing,
+                args            = args,
+                ret_args        = ret_args
                 )
 
 
@@ -617,14 +661,4 @@ print file_template.substitute(
     type_registrations = create_type_registrations(),
     enum_registrations = create_enum_registrations()
     )
-
-
-
-
-
-
-
-
-
-
 

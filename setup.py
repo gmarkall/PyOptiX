@@ -1,4 +1,5 @@
 from distutils.core import setup, Extension
+import numpy
 
 module1 = Extension(
         'optix', 
@@ -6,7 +7,7 @@ module1 = Extension(
         libraries     = [ 'optix' ],
         #include_dirs  = [ '/Users/kmorley/Code/rtsdk/rtmain/include' ],
         #library_dirs  = [ '/Users/kmorley/Code/rtsdk/rtmain/build_debug/lib' ],
-        include_dirs  = [ '/Users/keith/Code/rtsdk/rtmain/include' ],
+        include_dirs  = [ '/Users/keith/Code/rtsdk/rtmain/include', numpy.get_include() ],
         library_dirs  = [ '/Users/keith/Code/rtsdk/rtmain/build_debug/lib' ],
         )
 
