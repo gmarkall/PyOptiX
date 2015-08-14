@@ -291,9 +291,7 @@ file_template = string.Template( '''
  *
  */
 
-#include <Python.h>
-#include <optix_host.h>
-#include <numpy/arrayobject.h>
+#include "PyOptiXUtil.h"
 
 #include <stdio.h>
 
@@ -304,6 +302,9 @@ ${module_methods}
 
 void initoptix()
 {
+  Py_Initialize();
+  import_array();
+
   PyObject* mod = Py_InitModule("optix", optix_methods);
 
 ${type_registrations}
@@ -447,7 +448,7 @@ C_to_Py = {
         'const char**'              : ( 'const char*'       , 's' ,  '=0'          , '&{}'      ,  '{}'                        ),
         'void*'                     : ( 'void*'             , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
         'const void*'               : ( 'const char'        , 'O' ,  '[1024]={0}'  , '{}'       ,  '{}'                         ),
-        'void**'                    : ( 'void*'             , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
+        'void**'                    : ( 'void*'             , 'O' ,  '=0'          , '&{}'      ,  'createNumpyArray( self->p, {} )' ),
         'RTsize'                    : ( 'RTsize'            , 'n' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTsize*'                   : ( 'RTsize'            , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
         'const RTsize*'             : ( 'RTsize'            , ''  ,  '[3]={0ull}'  , '{}'       ,  '{}'                         ),
@@ -552,6 +553,8 @@ def create_method_code( rt_type, method_name, func ):
 
     args = ', '.join( args )
     parse_args = ', '.join( parse_args )
+    if format_string:
+        format_string += ':{}.{}'.format( rt_type, funcname )
     arg_parse = arg_parse_template.substitute(
             format_string = format_string,
             parse_args    = ', ' + parse_args if parse_args else ''
@@ -729,6 +732,7 @@ def create_enum_registrations():
 enums = parse_enums()
 funcs = parse_funcs()
 
+print >> sys.stderr, '\n*********** Generating optix module ***********\n'
 print file_template.substitute(
     types              = create_types( funcs ),
     module_methods     = create_module_methods( funcs[ None ] ),

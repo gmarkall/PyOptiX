@@ -3,11 +3,16 @@
 import optix 
 import os
 import sys 
+#import Image
+import numpy
 
 class Sample5:
 
-    WIDTH  = 1024
-    HEIGHT = 768 
+    #WIDTH  = 1024
+    #HEIGHT = 768 
+    
+    WIDTH  = 128 
+    HEIGHT = 96 
 
     def __init__( self, ptx_path ): 
         self.context       = None
@@ -74,7 +79,8 @@ class Sample5:
         miss_program = context.programCreateFromPTXFile( self.get_ptx_path( 'constantbg' ), 'miss' )
         context.setMissProgram( 0, miss_program)
         variable = context.declareVariable( "bg_color" )
-        variable.set3f( 0.3, 0.1, 0.2 )
+        #variable.set3f( 0.3, 0.1, 0.2 )
+        variable.set3f( 0.3, 0.1, 0.1 )
   
         return context
   
@@ -136,7 +142,28 @@ class Sample5:
   
         # display
         print "here 7"
+        #print 'Map: ' + str( self.output_buffer.map() )
         #self.output_buffer.writeToPPM "foo.ppm" 
+
+        array = self.output_buffer.map()
+        print array.size
+        print array.shape
+        #print dir( array )
+        with open( 'output.ppm', 'wb' ) as image_file:
+            print >> image_file, 'P3'
+            print >> image_file, '{} {}'.format( array.shape[0], array.shape[1] )
+            print >> image_file, '255'
+
+            for i in range( array.shape[0] ):
+                for j in range( array.shape[1] ):
+                    print >> image_file, '{}'.format( array[i][j][2] ),
+                    print >> image_file, '{}'.format( array[i][j][1] ),
+                    print >> image_file, '{}'.format( array[i][j][0] ),
+            #flat = array.flatten( 'A' )
+            #for i in flat:
+            #    print >> image_file, '{}'.format( i ),
+
+            
   
         self.context.destroy()
         print "here 8"
