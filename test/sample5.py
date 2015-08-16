@@ -59,7 +59,8 @@ class Sample5:
   
         print '\there 0.4'
         variable = context.declareVariable( "eye" )
-        variable.set3f( 0, 0, 5 )
+        variable.set3f( 0, 0 )
+        #variable.set3f( 0, 0, 5 )
         variable = context.declareVariable( "U" )
         variable.set3f( 2.88675, 0, 0 )
         variable = context.declareVariable( "V" )

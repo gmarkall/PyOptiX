@@ -182,19 +182,9 @@ static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
 
 ${arg_parsing}
                                                                                  
-  RTresult res = ${optix_func_name}( ${args} );
-  if( res != RT_SUCCESS )                                                        
-  {                                                                              
-    const char* optix_err_str = 0;                                                     
-    char  err_str[512];                                                          
-    RTcontext ctx;                                                               
-    rt${rt_type}GetContext( self->p, &ctx );                                          
-    rtContextGetErrorString( ctx, res, &optix_err_str );                                     
-    
-    snprintf( err_str, 512, "${rt_type}.${method_name}() failed with error '%s'", optix_err_str );
-    PyErr_SetString( PyExc_RuntimeError, err_str );                              
-    return 0;                                                                    
-  }                                                                              
+  RTcontext ctx;                                                               
+  rt${rt_type}GetContext( self->p, &ctx );                                          
+  CHECK_RT_RESULT( ${optix_func_name}( ${args} ), ctx, "${rt_type}.${method_name}" );
 
   return Py_BuildValue( ${ret_args} );
 }
@@ -212,17 +202,7 @@ static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
 
 ${arg_parsing}
                                                                                  
-  RTresult res = ${optix_func_name}( ${args} );
-  if( res != RT_SUCCESS )                                                        
-  {                                                                              
-    const char* optix_err_str = 0;                                                     
-    char  err_str[512];                                                          
-    rtContextGetErrorString( self->p, res, &optix_err_str );                                     
-    
-    snprintf( err_str, 512, "${rt_type}.${method_name}() failed with error '%s'", optix_err_str );
-    PyErr_SetString( PyExc_RuntimeError, err_str );                              
-    return 0;                                                                    
-  }                                                                              
+  CHECK_RT_RESULT( ${optix_func_name}( ${args} ), self->p, "${rt_type}.${method_name}" );
 
   return Py_BuildValue( ${ret_args} );
 }
@@ -240,17 +220,7 @@ static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
 
 ${arg_parsing}
                                                                                  
-  RTresult res = ${optix_func_name}( ${args} );
-  if( res != RT_SUCCESS )                                                        
-  {                                                                              
-    const char* optix_err_str = 0;                                                     
-    char  err_str[512];                                                          
-    rtContextGetErrorString( 0, res, &optix_err_str );                                     
-    
-    snprintf( err_str, 512, "${rt_type}.${method_name}() failed with error '%s'", optix_err_str );
-    PyErr_SetString( PyExc_RuntimeError, err_str );                              
-    return 0;                                                                    
-  }                                                                              
+  CHECK_RT_RESULT( ${optix_func_name}( ${args} ), 0, "${rt_type}.${method_name}" );
 
   return Py_BuildValue( ${ret_args} );
 }

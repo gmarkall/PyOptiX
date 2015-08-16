@@ -165,3 +165,48 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
 }
 
 
+#define CHECK_RT_RESULT( res, ctx, py_funcname )                                \
+{                                                                               \
+  if( ( res ) != RT_SUCCESS )                                                   \
+  {                                                                             \
+    const char* optix_err_str = 0;                                              \
+    char  err_str[1024];                                                        \
+    rtContextGetErrorString( ctx, res, &optix_err_str );                        \
+                                                                                \
+    snprintf( err_str, 1024, "%s() failed with error '%s'", py_funcname, optix_err_str ); \
+    PyErr_SetString( PyExc_RuntimeError, err_str );                             \
+    return 0;                                                                   \
+  }                                                                             \
+}
+
+
+
+/*
+
+  {
+    "createContext",
+    (PyCFunction)optix_createContext,
+    METH_VARARGS | METH_KEYWORDS,
+    "createContext"
+  },
+
+ */
+static PyObject* optix_createContext( PyObject* self, PyObject* args, PyObject* kwds )
+{
+  int ray_type_count    = -1;
+  int entry_point_count = -1;
+  static char* kwlist[] = { "ray_type_count", "entry_point_count", NULL };
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|ii:optix.createContext", kwlist, &ray_type_count, &entry_point_count ) )
+    return NULL; 
+
+  RTcontext context=0;
+  CHECK_RT_RESULT( rtContextCreate( &context ), 0, "optix.createContext" );
+
+  if( ray_type_count != -1 )
+    CHECK_RT_RESULT( rtContextSetRayTypeCount( context, ray_type_count ), context, "optix.createContext" );
+
+  if( entry_point_count != -1 )
+    CHECK_RT_RESULT( rtContextSetEntryPointCount( context, entry_point_count), context, "optix.createContext" );
+
+  return Py_BuildValue( "O&", ContextNew, context );
+}

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 import optix 
 import os
@@ -29,7 +29,7 @@ class Sample5:
 
     def createContext( self ):
         print '\there 0.0'
-        context = optix.contextCreate(
+        context = optix.createContext(
                 ray_type_count    = 1,
                 entry_point_count = 1
                 )
