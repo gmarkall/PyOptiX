@@ -1,10 +1,9 @@
 
-#include <Python.h>
-#include <optix_host.h>
+#include "PyOptixDecls.h"
 #include <numpy/arrayobject.h>
 
 
-static void getElementType( RTformat format, int* element_py_array_type, unsigned int* element_dimensionality )
+static void getNumpyElementType( RTformat format, int* element_py_array_type, unsigned int* element_dimensionality )
 {
   switch( format )
   {
@@ -102,7 +101,7 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
 
   int element_py_array_type;
   unsigned int element_dimensionality;
-  getElementType( format, &element_py_array_type, &element_dimensionality );
+  getNumpyElementType( format, &element_py_array_type, &element_dimensionality );
 
   fprintf( stderr, "format: %i %i\n", format, RT_FORMAT_UNSIGNED_BYTE );
   fprintf( stderr, "eldim : %i\n", element_dimensionality );
@@ -142,6 +141,21 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
       );
   return array;
   */
+  /*
+  npy_intp strides[4];
+  strides[0] = element_dimensionality;
+  strides[1] = element_dimensionality*dims[0];
+  strides[2] = 1; 
+  return PyArray_NewFromDescr(
+      &PyArray_Type, 
+      PyArray_DescrFromType( element_py_array_type ),
+      dimensionality,
+      dims, 
+      0, 
+      data, 
+      NPY_ARRAY_C_CONTIGUOUS,
+      0 );
+      */
   return PyArray_SimpleNewFromData(
       dimensionality,
       dims,

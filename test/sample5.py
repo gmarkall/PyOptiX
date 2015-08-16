@@ -1,9 +1,9 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 import optix 
 import os
 import sys 
-#import Image
+from PIL import Image
 import numpy
 
 class Sample5:
@@ -144,7 +144,10 @@ class Sample5:
         print "here 7"
         #print 'Map: ' + str( self.output_buffer.map() )
         #self.output_buffer.writeToPPM "foo.ppm" 
-
+        '''
+        im = Image.fromarray( self.output_buffer.map() )
+        im.save("your_file.jpeg")
+        '''
         array = self.output_buffer.map()
         print array.size
         print array.shape

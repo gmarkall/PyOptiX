@@ -286,13 +286,26 @@ ${arg_parsing}
 ''')
 
 
-file_template = string.Template( '''
+decls_file_template = string.Template( '''
 /*
  *
  */
 
-#include "PyOptiXUtil.h"
+#include <Python.h>
+#include <optix_host.h>
 
+
+${type_decls}
+
+''' )
+
+
+module_file_template = string.Template( '''
+/*
+ *
+ */
+
+#include "PyOptiXUtil.h" 
 #include <stdio.h>
 
 
@@ -686,20 +699,22 @@ def create_type_methods( rt_type, func_decls, context_func_decls ):
 
 
 def create_types( funcs ):    
-    types = ''
+    type_decls  = ''
     for rt_type in rt_types:
-        types += type_declare_template.substitute(  
+        type_decls += type_declare_template.substitute(  
                 rt_type         = rt_type,
                 opaque_type     = get_opaque_type( rt_type ),
                 )
+
+    type_defs   = ''
     for rt_type in rt_types:
         rt_type_methods = create_type_methods( rt_type, funcs[rt_type], funcs['Context'])
-        types += type_template.substitute( 
+        type_defs += type_template.substitute( 
                 rt_type         = rt_type,
                 opaque_type     = get_opaque_type( rt_type ),
                 rt_type_methods = rt_type_methods 
                 )
-    return types
+    return ( type_decls, type_defs )
 
 
 def create_type_registrations():
@@ -732,11 +747,21 @@ def create_enum_registrations():
 enums = parse_enums()
 funcs = parse_funcs()
 
+
 print >> sys.stderr, '\n*********** Generating optix module ***********\n'
-print file_template.substitute(
-    types              = create_types( funcs ),
-    module_methods     = create_module_methods( funcs[ None ] ),
-    type_registrations = create_type_registrations(),
-    enum_registrations = create_enum_registrations()
-    )
+
+( type_decls, type_defs ) = create_types( funcs )
+
+with open( 'PyOptiXDecls.h', 'w' ) as decls_file:
+    print >> decls_file, decls_file_template.substitute(
+            type_decls = type_decls
+            )
+
+with open( 'PyOptiXModule.c', 'w' ) as module_file:
+    print >> module_file, module_file_template.substitute(
+        types              = type_defs,
+        module_methods     = create_module_methods( funcs[ None ] ),
+        type_registrations = create_type_registrations(),
+        enum_registrations = create_enum_registrations()
+        )
 
