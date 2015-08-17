@@ -5,6 +5,15 @@ import re
 import sys
 import string
 
+lexical_scopes = [
+    'Context',
+    'Program',
+    'Selector',
+    'GeometryInstance',
+    'Geometry',
+    'Material'
+    ]
+
 rt_types = [
     'Variable',     # Needs to be before lexical scopes
     'Acceleration',

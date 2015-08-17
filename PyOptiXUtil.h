@@ -2,6 +2,21 @@
 #include "PyOptixDecls.h"
 #include <numpy/arrayobject.h>
 
+#define CHECK_RT_RESULT( res, ctx, py_funcname )                                \
+{                                                                               \
+  if( ( res ) != RT_SUCCESS )                                                   \
+  {                                                                             \
+    const char* optix_err_str = 0;                                              \
+    char  err_str[1024];                                                        \
+    rtContextGetErrorString( ctx, res, &optix_err_str );                        \
+                                                                                \
+    snprintf( err_str, 1024, "%s() failed with error '%s'", py_funcname, optix_err_str ); \
+    PyErr_SetString( PyExc_RuntimeError, err_str );                             \
+    return 0;                                                                   \
+  }                                                                             \
+}
+
+
 
 static void getNumpyElementType( RTformat format, int* element_py_array_type, unsigned int* element_dimensionality )
 {
@@ -37,7 +52,6 @@ static void getNumpyElementType( RTformat format, int* element_py_array_type, un
     case RT_FORMAT_UNSIGNED_BYTE4:
       *element_py_array_type  = NPY_UINT8;
       *element_dimensionality = 1 + format - RT_FORMAT_UNSIGNED_BYTE;
-      fprintf( stderr, "1 + %i - %i = %i\n", format, RT_FORMAT_UNSIGNED_BYTE, 1 + format - RT_FORMAT_UNSIGNED_BYTE );  
       return;
 
     case RT_FORMAT_SHORT:
@@ -87,6 +101,7 @@ static void getNumpyElementType( RTformat format, int* element_py_array_type, un
   }
 }
 
+
 static PyObject* createNumpyArray( RTbuffer buffer, void* data )
 {
 
@@ -103,11 +118,6 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
   unsigned int element_dimensionality;
   getNumpyElementType( format, &element_py_array_type, &element_dimensionality );
 
-  fprintf( stderr, "format: %i %i\n", format, RT_FORMAT_UNSIGNED_BYTE );
-  fprintf( stderr, "eldim : %i\n", element_dimensionality );
-  fprintf( stderr, "dim   : %i\n", dimensionality );
-
-
   npy_intp dims[4];
   dims[0] = rt_dims[0];
   dims[1] = rt_dims[1];
@@ -115,32 +125,7 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
   dims[3] = 0;
   dims[ dimensionality ] = element_dimensionality;
   dimensionality += (int)( element_dimensionality > 1 );
-  fprintf( stderr, "dim   : %i\n", dimensionality );
 
-  fprintf( stderr, "dimensionality %i\n" "dims           %i  %i  %i  %i\n" "array type     %i\n",
-      dimensionality,
-      dims[0],
-      dims[1],
-      dims[2],
-      dims[3], 
-      element_py_array_type );
-
-  fprintf( stderr, "dimensionality %i\n", dimensionality );
-  fprintf( stderr, "dims           %i  %i  %i  %i\n" ,
-      dims[0],
-      dims[1],
-      dims[2],
-      dims[3] );
-  fprintf( stderr, "array type     %i should be %i \n", element_py_array_type, NPY_UINT8 );
-
-  /*
-  PyObject* array = PyArray_SimpleNew(
-      dimensionality,
-      dims,
-      element_py_array_type
-      );
-  return array;
-  */
   /*
   npy_intp strides[4];
   strides[0] = element_dimensionality;
@@ -163,22 +148,6 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
       data 
       );
 }
-
-
-#define CHECK_RT_RESULT( res, ctx, py_funcname )                                \
-{                                                                               \
-  if( ( res ) != RT_SUCCESS )                                                   \
-  {                                                                             \
-    const char* optix_err_str = 0;                                              \
-    char  err_str[1024];                                                        \
-    rtContextGetErrorString( ctx, res, &optix_err_str );                        \
-                                                                                \
-    snprintf( err_str, 1024, "%s() failed with error '%s'", py_funcname, optix_err_str ); \
-    PyErr_SetString( PyExc_RuntimeError, err_str );                             \
-    return 0;                                                                   \
-  }                                                                             \
-}
-
 
 
 /*
@@ -210,3 +179,21 @@ static PyObject* optix_createContext( PyObject* self, PyObject* args, PyObject* 
 
   return Py_BuildValue( "O&", ContextNew, context );
 }
+
+PyObject* ContextGetItem( PyObject* self, PyObject* key )
+{
+  if( !PyString_Check( key ) )
+    PyErr_SetString( PyExc_TypeError, "Context.getItem() called with non-string key" );
+
+  const char* str = PyString_AsString( key ); 
+  RTcontext ctx = ( (Context*)self )->p;
+
+  RTvariable v;
+  rtContextQueryVariable( ctx, str, &v );
+  if( !v )
+    rtContextDeclareVariable( ctx, str, &v );
+
+  return Py_BuildValue( "O&", VariableNew, v );
+}
+
+static PyMappingMethods ContextMappingMethods = { 0, ContextGetItem, 0 };
