@@ -28,26 +28,22 @@ class Sample5:
   
 
     def createContext( self ):
-        print '\there 0.0'
         context = optix.createContext(
                 ray_type_count    = 1,
                 entry_point_count = 1
                 )
   
-        print '\there 0.1'
         context[ 'radiance_ray_type' ].setUint( 0 )
         context[ 'scene_epsilon'     ].setFloat( 0.0001 )
   
-        print '\there 0.2'
         self.output_buffer = context.createBuffer( 
-               optix.BUFFER_OUTPUT,
-               optix.RT_FORMAT_UNSIGNED_BYTE4,
-               self.WIDTH,
-               self.HEIGHT 
+               type   = optix.BUFFER_OUTPUT,
+               format = optix.RT_FORMAT_UNSIGNED_BYTE4,
+               width  = self.WIDTH,
+               height = self.HEIGHT 
                )
         context[ 'output_buffer' ].set( self.output_buffer ) 
   
-        print '\there 0.3'
         # ray gen prog 
         ray_gen_program = context.createProgramFromPTXFile( self.get_ptx_path( 'pinhole_camera' ), "pinhole_camera" )
         context.setRayGenerationProgram( 0, ray_gen_program )
@@ -56,13 +52,11 @@ class Sample5:
         context[ "V" ].setFloat( 0      , 2.16506,  0 )
         context[ "W" ].setFloat( 0      , 0      , -5 )
   
-        print '\there 0.5'
         # exception program
         exception_program = context.createFromPTXFile( self.get_ptx_path( 'pinhole_camera' ), 'exception' )
         context.setExceptionProgram( 0, exception_program )
         context[ "bad_color" ].setFloat( 1.0, 1.0, 0.0 )
   
-        print '\there 0.6'
         # miss prog
         miss_program = context.programCreateFromPTXFile( self.get_ptx_path( 'constantbg' ), 'miss' )
         context.setMissProgram( 0, miss_program)

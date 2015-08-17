@@ -86,6 +86,7 @@ static void ${rt_type}_dealloc( ${rt_type}* self )
 
 ${rt_type_methods}
 
+${rt_type_getitem}
 
 static PyTypeObject ${rt_type}Type =
 {
@@ -102,7 +103,7 @@ static PyTypeObject ${rt_type}Type =
     0,                         /*tp_repr*/
     0,                         /*tp_as_number*/
     0,                         /*tp_as_sequence*/
-    0,                         /*tp_as_mapping*/
+    ${getitem_meth},                /*tp_as_mapping*/
     0,                         /*tp_hash */
     0,                         /*tp_call*/
     0,                         /*tp_str*/
@@ -277,6 +278,27 @@ decls_file_template = string.Template( '''
 ${type_decls}
 
 ''' )
+
+
+getitem_template = string.Template( '''
+static PyObject* ${rt_type}GetItem( PyObject* self, PyObject* key )
+{
+  if( !PyString_Check( key ) )
+    PyErr_SetString( PyExc_TypeError, "${rt_type}.getItem() called with non-string key" );
+
+  const char* str = PyString_AsString( key ); 
+  ${opaque_type} p = ( (${rt_type}*)self )->p;
+
+  RTvariable v;
+  CHECK_RT_RESULT( rt${rt_type}QueryVariable( p, str, &v ), 0, "${rt_type}.__getitem__" );
+  if( !v )
+    CHECK_RT_RESULT( rt${rt_type}DeclareVariable( p, str, &v ), 0, "${rt_type}.__getitem__" );
+
+  return Py_BuildValue( "O&", VariableNew, v );
+}
+
+static PyMappingMethods ${rt_type}MappingMethods = { 0, ${rt_type}GetItem, 0 };
+''')
 
 
 module_file_template = string.Template( '''
@@ -688,8 +710,11 @@ def create_types( funcs ):
     type_defs   = ''
     for rt_type in rt_types:
         rt_type_methods = create_type_methods( rt_type, funcs[rt_type], funcs['Context'])
+        rt_type_getitem = getitem_template.substitute( rt_type = rt_type, opaque_type = get_opaque_type( rt_type ) ) if rt_type in lexical_scopes else ''
         type_defs += type_template.substitute( 
                 rt_type         = rt_type,
+                rt_type_getitem = rt_type_getitem,
+                getitem_meth    = '&{}MappingMethods'.format( rt_type ) if rt_type in lexical_scopes else '0',
                 opaque_type     = get_opaque_type( rt_type ),
                 rt_type_methods = rt_type_methods 
                 )

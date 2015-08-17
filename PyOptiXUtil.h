@@ -180,6 +180,8 @@ static PyObject* optix_createContext( PyObject* self, PyObject* args, PyObject* 
   return Py_BuildValue( "O&", ContextNew, context );
 }
 
+
+/*
 PyObject* ContextGetItem( PyObject* self, PyObject* key )
 {
   if( !PyString_Check( key ) )
@@ -197,3 +199,4 @@ PyObject* ContextGetItem( PyObject* self, PyObject* key )
 }
 
 static PyMappingMethods ContextMappingMethods = { 0, ContextGetItem, 0 };
+*/
