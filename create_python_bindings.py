@@ -14,6 +14,7 @@ lexical_scopes = [
     'Material'
     ]
 
+
 rt_types = [
     'Variable',     # Needs to be before lexical scopes
     'Acceleration',
@@ -49,6 +50,7 @@ type_reg_template = string.Template( '''
       );
 ''')
 
+
 type_declare_template = string.Template( '''
 typedef struct 
 {
@@ -70,6 +72,7 @@ static PyObject* ${rt_type}New( void* p )
 
 
 ''')
+
 
 type_template = string.Template( '''
 /******************************************************************************\
@@ -140,21 +143,6 @@ enum_template = string.Template( '''\
 ''')
 
 
-create_template = string.Template( '''
-static PyObject *
-Context_create_${rt_type}( Context* self, PyObject* args )
-{
-    ${rt_type}* o = PyObject_New( ${rt_type}, &${rt_type}Type );
-    RTresult res = rt${rt_type}Create( self->p, &o->p );
-    if( res != RT_SUCCESS )
-    {
-       PyObject_Del( (PyObject*)o );
-       o = 0;
-    }
-    return (PyObject*)o;
-}
-''')
-
 
 methods_struct_template = string.Template( '''
 static PyMethodDef ${rt_type}_methods[] =
@@ -165,24 +153,24 @@ static PyMethodDef ${rt_type}_methods[] =
 ''')
 
 
-
 method_registration_template = string.Template('''
   {
     "${method_name}",
     (PyCFunction)${rt_type}_${method_name},
-    METH_VARARGS,
+    METH_VARARGS | METH_KEYWORDS,
     "${method_name}"
   },
 ''')
 
+
 arg_parse_template = string.Template('''
-  if( !PyArg_ParseTuple( args, "${format_string}"${parse_args} ) )
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "${format_string}", kwlist${parse_args} ) )
     return NULL;
 ''')
 
 
 type_method_def_template = string.Template('''
-static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
+static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args, PyObject* kwds )
 {
   if( !self->p )                                                                 
   {                                                                                 
@@ -202,7 +190,7 @@ ${arg_parsing}
 
 
 type_method_def_context_template = string.Template('''
-static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
+static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args, PyObject* kwds )
 {
   if( !self->p )                                                                 
   {                                                                                 
@@ -220,7 +208,7 @@ ${arg_parsing}
 
 
 type_method_def_remotedevice_template= string.Template('''
-static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
+static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args, PyObject* kwds )
 {
   if( !self->p )                                                                 
   {                                                                                 
@@ -238,7 +226,7 @@ ${arg_parsing}
 
 
 type_method_def_no_res_template = string.Template('''
-static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args )
+static PyObject* ${rt_type}_${method_name}( ${rt_type}* self, PyObject* args, PyObject* kwds )
 {
   if( !self->p )                                                                 
   {                                                                                 
@@ -255,7 +243,7 @@ ${arg_parsing}
 ''')
 
 method_def= string.Template('''
-static PyObject* optix_${method_name}( PyObject* self, PyObject* args )
+static PyObject* optix_${method_name}( PyObject* self, PyObject* args, PyObject* kwds )
 {
 ${arg_parsing}
                                                                                  
@@ -546,6 +534,7 @@ def create_method_code( rt_type, method_name, func ):
     parse_args    = [] 
     args = [ 'self->p' ] if rt_type else [] 
     rets          = []
+    kws        = []
 
     #print params
     #print params[1 if rt_type else 0:]
@@ -563,17 +552,21 @@ def create_method_code( rt_type, method_name, func ):
             ret_format_string += param_format_str 
         else:
             parse_args.append( parse_arg_decorator.format( param[1] ) )
+            kws.append( '"{}"'.format( param[1] ) )
             format_string += param_format_str
 
     args = ', '.join( args )
     parse_args = ', '.join( parse_args )
     if format_string:
         format_string += ':{}.{}'.format( rt_type, funcname )
+
+    kws.append( '0' );
+    kwlist = '\n  static char* kwlist[] = {{ {} }};\n'.format( ', '.join( kws ) )
     arg_parse = arg_parse_template.substitute(
             format_string = format_string,
             parse_args    = ', ' + parse_args if parse_args else ''
             )
-    arg_parsing = arg_decls + arg_parse
+    arg_parsing = arg_decls + kwlist + arg_parse
 
     if not rets:
         ret_args = '""'
@@ -639,7 +632,6 @@ def create_mod_method( func ):
 
 
 def create_type_method( rt_type, func ):
-    # keith
     
     method_name = rt_funcname_to_methodname( rt_type, func[1] )
     method_registration = method_registration_template.substitute( 
