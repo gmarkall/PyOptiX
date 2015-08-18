@@ -32,6 +32,25 @@ rt_types = [
     'Context',      # needs to be last since it acts as factory
     ]
 
+custom_funcs = {
+        'Variable'         : [],
+        'Acceleration'     : [],
+        'Buffer'           : [],
+        'GeometryGroup'    : [],
+        'GeometryInstance' : [],
+        'Geometry'         : [],
+        'Group'            : [],
+        'Material'         : [],
+        'Program'          : [],
+        'RemoteDevice'     : [],
+        'Selector'         : [],
+        'TextureSampler'   : [],
+        'Transform'        : [],
+        'Context'          : [],
+        'optix'            : [ 'createContext' ],
+        }
+
+
 
 ################################################################################
 #
@@ -663,6 +682,12 @@ def create_mod_methods( func_decls ):
         type_methods += method
         method_registrations += method_registration
 
+    for custom_func in custom_funcs[ 'optix' ]:
+        method_registrations += method_registration_template.substitute( 
+            rt_type='optix',
+            method_name=custom_func
+            )
+
     #print type_methods
     #print method_registrations
 
@@ -683,6 +708,13 @@ def create_type_methods( rt_type, func_decls, context_func_decls ):
         ( method_registration, method ) = create_type_method( rt_type, func )
         type_methods += method
         method_registrations += method_registration
+    
+    for custom_func in custom_funcs[ rt_type ]:
+        method_registrations += method_registration_template.substitute( 
+            rt_type=rt_type,
+            method_name=custom_func
+            )
+
 
     type_methods += methods_struct_template.substitute( 
         rt_type=rt_type, 
