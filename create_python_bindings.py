@@ -33,7 +33,7 @@ rt_types = [
     ]
 
 custom_funcs = {
-        'Variable'         : [],
+        'Variable'         : [ 'setUint', 'setInt', 'setFloat' ],
         'Acceleration'     : [],
         'Buffer'           : [],
         'GeometryGroup'    : [],

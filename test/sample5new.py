@@ -33,8 +33,11 @@ class Sample5:
                 entry_point_count = 1
                 )
   
+        context[ 'radiance_ray_type_int' ].setInt( 0 )
         context[ 'radiance_ray_type' ].setUint( 0 )
-        context[ 'scene_epsilon'     ].setFloat( 0.0001 )
+        v = context[ 'scene_epsilon'     ]
+        #v.setFloat( 0.0001 )
+        v.setFloat( 0.0001 )
   
         self.output_buffer = context.createBuffer( 
                type   = optix.BUFFER_OUTPUT,

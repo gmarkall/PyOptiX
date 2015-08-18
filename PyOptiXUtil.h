@@ -1,9 +1,10 @@
 
 #include "PyOptixDecls.h"
+#include <stdio.h>
 #include <numpy/arrayobject.h>
 
 #define CHECK_RT_RESULT( res, ctx, py_funcname )                                \
-{                                                                               \
+do {                                                                            \
   if( ( res ) != RT_SUCCESS )                                                   \
   {                                                                             \
     const char* optix_err_str = 0;                                              \
@@ -14,7 +15,7 @@
     PyErr_SetString( PyExc_RuntimeError, err_str );                             \
     return 0;                                                                   \
   }                                                                             \
-}
+} while( 0 )
 
 
 
@@ -150,16 +151,6 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
 }
 
 
-/*
-
-  {
-    "createContext",
-    (PyCFunction)optix_createContext,
-    METH_VARARGS | METH_KEYWORDS,
-    "createContext"
-  },
-
- */
 static PyObject* optix_createContext( PyObject* self, PyObject* args, PyObject* kwds )
 {
   int ray_type_count    = -1;
@@ -181,22 +172,85 @@ static PyObject* optix_createContext( PyObject* self, PyObject* args, PyObject* 
 }
 
 
-/*
-PyObject* ContextGetItem( PyObject* self, PyObject* key )
+static PyObject* Variable_setUint( PyObject* self, PyObject* args, PyObject* kwds )
 {
-  if( !PyString_Check( key ) )
-    PyErr_SetString( PyExc_TypeError, "Context.getItem() called with non-string key" );
+  unsigned int u1 = 0, u2 = 0, u3 = 0, u4 = 0;
+  static char* kwlist[] = { "u1", "u2", "u3", "u4", NULL };
+  if( !PyList_Check( args ) )
+    fprintf( stderr, "ARGS NOT LIST!!!!!!!!!!!\n\n" );
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "I|III:Variable.setUint", kwlist, &u1, &u2, &u3, &u4 ) )
+    return 0; 
 
-  const char* str = PyString_AsString( key ); 
-  RTcontext ctx = ( (Context*)self )->p;
+  Py_ssize_t len = args ? PyList_Size( args ) : 0;
+  RTvariable v = ( (Variable*) self )->p;
+  if(      len < 2 && !( kwds && PyDict_GetItemString( kwds, "u2" ) ) )
+    CHECK_RT_RESULT( rtVariableSet1ui( v, u1 ), 0, "Variable.setUint" );
+  else if( len < 3 && !( kwds && PyDict_GetItemString( kwds, "u3" ) ) )
+    CHECK_RT_RESULT( rtVariableSet2ui( v, u1, u2 ), 0, "Variable.setUint" );
+  else if( len < 4 && !( kwds && PyDict_GetItemString( kwds, "u4" ) ) )
+    CHECK_RT_RESULT( rtVariableSet3ui( v, u1, u2, u3 ), 0, "Variable.setUint" );
+  else 
+    CHECK_RT_RESULT( rtVariableSet4ui( v, u1, u2, u3, u4 ), 0, "Variable.setUint" );
 
-  RTvariable v;
-  rtContextQueryVariable( ctx, str, &v );
-  if( !v )
-    rtContextDeclareVariable( ctx, str, &v );
-
-  return Py_BuildValue( "O&", VariableNew, v );
+  return Py_BuildValue("");
 }
 
-static PyMappingMethods ContextMappingMethods = { 0, ContextGetItem, 0 };
-*/
+
+static PyObject* Variable_setInt( PyObject* self, PyObject* args, PyObject* kwds )
+{
+  int i1 = 0, i2 = 0, i3 = 0, i4 = 0;
+  static char* kwlist[] = { "i1", "i2", "i3", "i4", NULL };
+  if( !PyList_Check( args ) )
+    fprintf( stderr, "ARGS NOT LIST!!!!!!!!!!!\n\n" );
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "i|iii:Variable.setInt", kwlist, &i1, &i2, &i3, &i4 ) )
+    return 0; 
+
+  Py_ssize_t len = args ? PyList_Size( args ) : 0;
+  RTvariable v = ( (Variable*) self )->p;
+  if(      len < 2 && !( kwds && PyDict_GetItemString( kwds, "i2" ) ) )
+    CHECK_RT_RESULT( rtVariableSet1i( v, i1 ), 0, "Variable.setInt" );
+  else if( len < 3 && !( kwds && PyDict_GetItemString( kwds, "i3" ) ) )
+    CHECK_RT_RESULT( rtVariableSet2i( v, i1, i2 ), 0, "Variable.setInt" );
+  else if( len < 4 && !( kwds && PyDict_GetItemString( kwds, "i4" ) ) )
+    CHECK_RT_RESULT( rtVariableSet3i( v, i1, i2, i3 ), 0, "Variable.setInt" );
+  else 
+    CHECK_RT_RESULT( rtVariableSet4i( v, i1, i2, i3, i4 ), 0, "Variable.setInt" );
+
+  return Py_BuildValue("");
+}
+
+
+/*static PyObject* Variable_setFloat( PyObject* self, PyObject* args, PyObject* kwds )
+ * */
+static PyObject* Variable_setFloat( PyObject* self, PyObject* args, PyObject* kwds )
+{
+  float i1 = 0, i2 = 0, i3 = 0, i4 = 0;
+  if( !PyArg_ParseTuple( args, "ffff",  &i1, &i2, &i3, &i4 ) )
+    return 0; 
+
+  /*
+  float f1 = 0, f2 = 0, f3 = 0, f4 = 0;
+  static char* kwlist[] = { "f1", "f2", "f3", "f4", NULL };
+  if( !PyList_Check( args ) )
+    fprintf( stderr, "ARGS NOT LIST!!!!!!!!!!!\n\n" );
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "f|fff:Variable.setFloat", kwlist, &f1, &f2, &f3, &f4 ) )
+    return 0; 
+
+    */
+  /*
+  Py_ssize_t len = args ? PyObject_Size( args ) : 0;
+  fprintf( file, "SIZE: %i\n", len );
+  RTvariable v = ( (Variable*) self )->p;
+  if(      len < 2 && !( kwds && PyDict_GetItemString( kwds, "f2" ) ) )
+    CHECK_RT_RESULT( rtVariableSet1i( v, f1 ), 0, "Variable.setFloat" );
+  else if( len < 3 && !( kwds && PyDict_GetItemString( kwds, "f3" ) ) )
+    CHECK_RT_RESULT( rtVariableSet2i( v, f1, f2 ), 0, "Variable.setFloat" );
+  else if( len < 4 && !( kwds && PyDict_GetItemString( kwds, "f4" ) ) )
+    CHECK_RT_RESULT( rtVariableSet3i( v, f1, f2, f3 ), 0, "Variable.setFloat" );
+  else 
+    CHECK_RT_RESULT( rtVariableSet4i( v, f1, f2, f3, f4 ), 0, "Variable.setFloat" );
+    */
+
+  return Py_BuildValue("");
+}
+
