@@ -46,7 +46,15 @@ custom_funcs = {
         'Selector'         : [],
         'TextureSampler'   : [],
         'Transform'        : [],
-        'Context'          : [],
+        'Context'          : [ 'createAcceleration',
+                               'createBuffer',
+                               'createGeometry',
+                               'createGeometryGroup',
+                               'createGeometryInstance',
+                               'createGroup',
+                               'createMaterial',
+                               'createProgramFromPTXFile',
+                               ],
         'optix'            : [ 'createContext' ],
         }
 
@@ -156,7 +164,7 @@ static PyTypeObject ${rt_type}Type =
 
 
 enum_template = string.Template( '''\
-  v = PyLong_FromLong( ${enum_name} );
+  v = PyLong_FromLong( RT_${enum_name} );
   PyObject_SetAttrString( mod, "${enum_name}", v );
   Py_DECREF(v);
 ''')
@@ -402,7 +410,7 @@ def parse_enums():
         optix_decls_string = optix_decls.read()
 
         enums_re     = re.compile( 'typedef\s+enum\s+{[^\}]+}\s+\w+;', re.DOTALL )
-        enum_val_re  = re.compile( '^\s+(RT_\w+)[^,}]*[,}]', re.DOTALL|re.MULTILINE)
+        enum_val_re  = re.compile( '^\s+RT_(\w+)[^,}]*[,}]', re.DOTALL|re.MULTILINE)
         enum_name_re = re.compile( '\}\s+(RT[a-z]+)', re.DOTALL | re.MULTILINE )
 
         enums = enums_re.findall( optix_decls_string )
@@ -757,7 +765,7 @@ def create_module_methods( funcs ):
     return mod_methods 
 
 
-def create_enum_registrations():
+def create_enum_registrations( enums ):
     enum_registrations = ''
     for enum in enums:
         enum_registrations += '/*\n *\n enum {}\n */'.format( enum[0] )
@@ -790,6 +798,6 @@ with open( 'PyOptiXModule.c', 'w' ) as module_file:
         types              = type_defs,
         module_methods     = create_module_methods( funcs[ None ] ),
         type_registrations = create_type_registrations(),
-        enum_registrations = create_enum_registrations()
+        enum_registrations = create_enum_registrations( enums )
         )
 

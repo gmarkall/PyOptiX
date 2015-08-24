@@ -36,16 +36,15 @@ class Sample5:
         context[ 'radiance_ray_type_int' ].setInt( 0 )
         context[ 'radiance_ray_type' ].setUint( 0 )
         v = context[ 'scene_epsilon'     ]
-        #v.setFloat( 0.0001 )
         v.setFloat( 0.0001 )
   
         self.output_buffer = context.createBuffer( 
-               type   = optix.BUFFER_OUTPUT,
-               format = optix.RT_FORMAT_UNSIGNED_BYTE4,
-               width  = self.WIDTH,
-               height = self.HEIGHT 
+               bufferdesc = optix.BUFFER_OUTPUT,
+               format     = optix.FORMAT_UNSIGNED_BYTE4,
+               width      = self.WIDTH,
+               height     = self.HEIGHT 
                )
-        context[ 'output_buffer' ].set( self.output_buffer ) 
+        context[ 'output_buffer' ].setObject( self.output_buffer ) 
   
         # ray gen prog 
         ray_gen_program = context.createProgramFromPTXFile( self.get_ptx_path( 'pinhole_camera' ), "pinhole_camera" )
@@ -56,12 +55,18 @@ class Sample5:
         context[ "W" ].setFloat( 0      , 0      , -5 )
   
         # exception program
-        exception_program = context.createFromPTXFile( self.get_ptx_path( 'pinhole_camera' ), 'exception' )
+        exception_program = context.createProgramFromPTXFile( 
+                filename = self.get_ptx_path( 'pinhole_camera' ),
+                program  = 'exception'
+                )
         context.setExceptionProgram( 0, exception_program )
         context[ "bad_color" ].setFloat( 1.0, 1.0, 0.0 )
   
         # miss prog
-        miss_program = context.programCreateFromPTXFile( self.get_ptx_path( 'constantbg' ), 'miss' )
+        miss_program = context.programCreateFromPTXFile(
+                self.get_ptx_path( 'constantbg' ),
+                'miss'
+                )
         context.setMissProgram( 0, miss_program)
         context[ "bg_color" ].setFloat( 0.3, 0.1, 0.1 )
   
@@ -80,7 +85,10 @@ class Sample5:
 
 
     def createMaterial( self ):
-        chp = self.context.createFromPTXFile( self.get_ptx_path( 'normal_shader' ), 'closest_hit_radiance' )
+        chp = self.context.createProgramFromPTXFile( 
+                filename = self.get_ptx_path( 'normal_shader' ),
+                program  = 'closest_hit_radiance'
+                )
         matl = self.context.materialCreate()
         matl.setClosestHitProgram( 0, chp )
         return matl
@@ -94,13 +102,16 @@ class Sample5:
                 )
   
         # Create geometry group
-        accel =  self.context.createAcceleration( 'NoAccel', 'NoAccel' )
+        accel =  self.context.createAcceleration( 
+                builder   = 'NoAccel',
+                traverser = 'NoAccel'
+                )
         geometrygroup = self.context.createGeometryGroup( 
-                geometry_instances = [ gi ],
-                acceleration       = accel 
+                acceleration = accel,
+                children     = [ gi ]
                 )
   
-        self.context[ "top_object" ].set( geometrygroup )
+        self.context[ "top_object" ].setObject( geometrygroup )
   
 
     def run( self ):
