@@ -33,6 +33,16 @@ class Sample5:
                 entry_point_count = 1
                 )
   
+        xform = context.createTransform( 
+                matrix = [1.0, 0.0, 0.0, 0.0,
+                                                   0.0, 1.0, 0.0, 0.0,
+                                                   0.0, 0.0, 1.0, 0.0,
+                                                   0.0, 0.0, 0.0, 1.0 ],
+                inverse_matrix = [3.0, 4, 1.12, 0.0,
+                                                   0.0, 1.0, 0.0, 0.0,
+                                                   0.0, 0.0, 1.0, 0.0,
+                                                   0.0, 0.0, 0.0, 1.0 ],
+                                                   )
         context[ 'radiance_ray_type_int' ].setInt( 0 )
         context[ 'radiance_ray_type' ].setUint( 0 )
         v = context[ 'scene_epsilon'     ]
@@ -77,8 +87,10 @@ class Sample5:
         ptx_path = self.get_ptx_path( 'sphere' )
         sphere = self.context.createGeometry(
                 primitive_count = 1,
-                bounding_box_program = self.context.programCreateFromPTXFile( ptx_path, 'bounds' ),
-                intersection_program = self.context.programCreateFromPTXFile( ptx_path, 'intersect' )
+                bounding_box_program = self.context.programCreateFromPTXFile(
+                    ptx_path, 'bounds' ),
+                intersection_program = self.context.programCreateFromPTXFile(
+                    ptx_path, 'intersect' )
                 )
         sphere[ 'sphere' ].setFloat( 0, 0, 0, 1.5 )
         return sphere;

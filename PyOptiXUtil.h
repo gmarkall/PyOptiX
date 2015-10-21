@@ -160,7 +160,8 @@ static PyObject* optix_createContext( PyObject* self, PyObject* args, PyObject* 
   int ray_type_count    = -1;
   int entry_point_count = -1;
   static char* kwlist[] = { "ray_type_count", "entry_point_count", 0 };
-  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|ii:optix.createContext", kwlist, &ray_type_count, &entry_point_count ) )
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|ii:optix.createContext", kwlist,
+        &ray_type_count, &entry_point_count ) )
     return 0; 
 
   RTcontext context=0;
@@ -182,17 +183,18 @@ static PyObject* Context_createAcceleration( PyObject* self, PyObject* args, PyO
   const char* traverser = 0;
   
   static char* kwlist[] = { "builder", "traverser", 0 };
-  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|ss:context.createAcceleration", kwlist, &builder, &traverser ) )
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|ss:context.createAcceleration", kwlist,
+        &builder, &traverser ) )
     return 0; 
 
   RTcontext context = ( ( Context* )self )->p;
   RTacceleration  p = 0;
-  CHECK_RT_RESULT( rtAccelerationCreate( context, &p ), 0, "context.createAcceleration" );
+  CHECK_RT_RESULT( rtAccelerationCreate( context, &p ), context, "context.createAcceleration" );
 
   if( builder )
-    CHECK_RT_RESULT( rtAccelerationSetBuilder( p, builder ), 0, "context.createAcceleration" );
+    CHECK_RT_RESULT( rtAccelerationSetBuilder( p, builder ), context, "context.createAcceleration" );
   if( traverser )
-    CHECK_RT_RESULT( rtAccelerationSetTraverser( p, traverser ), 0, "context.createAcceleration" );
+    CHECK_RT_RESULT( rtAccelerationSetTraverser( p, traverser ), context, "context.createAcceleration" );
 
   return Py_BuildValue( "O&", AccelerationNew, p );
 }
@@ -205,8 +207,8 @@ static PyObject* Context_createBuffer( PyObject* self, PyObject* args, PyObject*
   int format = -1;
   int levels = -1;
   Py_ssize_t width = 0, height=0, depth=0;
-  if( !PyArg_ParseTupleAndKeywords( args, kwds, "i|iinnn:context.createBuffer",
-        kwlist, &bufferdesc, &format, &levels, &width, &height, &depth ) )
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "i|iinnn:context.createBuffer", kwlist,
+        &bufferdesc, &format, &levels, &width, &height, &depth ) )
     return 0; 
 
   RTcontext context = ( ( Context* )self )->p;
@@ -271,9 +273,8 @@ static PyObject* Context_createGeometryGroup( PyObject* self, PyObject* args, Py
     "children",
     0
   };
-  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|O!O!:context.createGeometryGroup", kwlist,
-        &AccelerationType, &accel,
-        &PyList_Type, &children ) )
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|O!O:context.createGeometryGroup", kwlist,
+        &AccelerationType, &accel, &children ) )
     return 0; 
 
   RTcontext context = ( ( Context* )self )->p;
@@ -285,11 +286,18 @@ static PyObject* Context_createGeometryGroup( PyObject* self, PyObject* args, Py
 
   if( children )
   {
-    int num_children = PyList_Size( children );
+    if( !PySequence_Check( children ) )
+    {
+      rtGeometryGroupDestroy( p );
+      PyErr_SetString( PyExc_RuntimeError, "Context.createGeometryGroup passed non-sequence child list" );
+      return 0;
+    }
+
+    int num_children = PySequence_Size( children );
     CHECK_RT_RESULT( rtGeometryGroupSetChildCount( p, num_children ), context, "context.createGeometryGroup" );
     for( int i = 0; i < num_children; ++i )
     {
-      PyObject* child = PyList_GetItem( children, i );
+      PyObject* child = PySequence_GetItem( children, i );
       if( !PyObject_TypeCheck( child, &GeometryInstanceType ) )
       {
         PyErr_SetString( PyExc_RuntimeError, "Context.createGeometry passed non-GeometryInstance child" );
@@ -314,9 +322,8 @@ static PyObject* Context_createGeometryInstance( PyObject* self, PyObject* args,
     "materials",
     0
   };
-  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|O!O!:context.createGeometryInstance", kwlist, 
-        &GeometryType, &geometry,
-        &PyList_Type, &materials ) )
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|O!O:context.createGeometryInstance", kwlist,
+        &GeometryType, &geometry, &materials ) )
     return 0; 
 
   RTcontext context = ( ( Context* )self )->p;
@@ -328,11 +335,18 @@ static PyObject* Context_createGeometryInstance( PyObject* self, PyObject* args,
 
   if( materials )
   {
-    int num_materials = PyList_Size( materials );
+    if( !PySequence_Check( materials ) )
+    {
+      rtGeometryInstanceDestroy( p );
+      PyErr_SetString( PyExc_RuntimeError, "Context.createGeometryInstance passed non-sequence materials list" );
+      return 0;
+    }
+
+    int num_materials = PySequence_Size( materials );
     CHECK_RT_RESULT( rtGeometryInstanceSetMaterialCount( p, num_materials ), context, "context.createGeometryInstance" );
     for( int i = 0; i < num_materials; ++i )
     {
-      PyObject* child = PyList_GetItem( materials, i );
+      PyObject* child = PySequence_GetItem( materials, i );
       if( !PyObject_TypeCheck( child, &MaterialType ) )
       {
         PyErr_SetString( PyExc_RuntimeError, "Context.createGeometryInstance passed non-Material in materials list" );
@@ -357,9 +371,8 @@ static PyObject* Context_createGroup( PyObject* self, PyObject* args, PyObject* 
     "children",
     0
   };
-  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|O!O!:context.createGroup", kwlist,
-        &AccelerationType, &accel,
-        &PyList_Type, &children ) )
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|O!O:context.createGroup", kwlist,
+        &AccelerationType, &accel, &children ) )
     return 0; 
 
   RTcontext context = ( ( Context* )self )->p;
@@ -371,11 +384,18 @@ static PyObject* Context_createGroup( PyObject* self, PyObject* args, PyObject* 
 
   if( children )
   {
-    int num_children = PyList_Size( children );
+    if( !PySequence_Check( children ) )
+    {
+      rtGroupDestroy( p );
+      PyErr_SetString( PyExc_RuntimeError, "Context.createGroup passed non-sequence child list" );
+      return 0;
+    }
+
+    int num_children = PySequence_Size( children );
     CHECK_RT_RESULT( rtGroupSetChildCount( p, num_children ), context, "context.createGroup" );
     for( int i = 0; i < num_children; ++i )
     {
-      PyObject* child = PyList_GetItem( children, i );
+      PyObject* child = PySequence_GetItem( children, i );
       if( !PyObject_TypeCheck( child, &GroupType         ) &&
           !PyObject_TypeCheck( child, &SelectorType      ) &&
           !PyObject_TypeCheck( child, &GeometryGroupType ) &&
@@ -386,7 +406,7 @@ static PyObject* Context_createGroup( PyObject* self, PyObject* args, PyObject* 
         return 0;
       }
       Group* group = (Group*)child; /* pick one of the allowed types randomly.  It will be typecast internally */
-      CHECK_RT_RESULT( rtGroupSetChild( p, i, group->p ), 0, "context.createGroup" );
+      CHECK_RT_RESULT( rtGroupSetChild( p, i, group->p ), context, "context.createGroup" );
     }
   }
 
@@ -399,13 +419,12 @@ static PyObject* Context_createMaterial( PyObject* self, PyObject* args, PyObjec
   PyObject* closest_hits = 0;
   PyObject* any_hits = 0;
   static char* kwlist[] = {
-    "closest_hit_program",
-    "any_hit_program",
+    "closest_hit_programs",
+    "any_hit_programs",
     0
   };
-  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|O!O!:context.createMaterial", kwlist,
-        &PyList_Type, &closest_hits,
-        &PyList_Type, &any_hits ) )
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|OO:context.createMaterial", kwlist,
+        &closest_hits, &any_hits ) )
     return 0; 
 
   RTcontext context = ( ( Context* )self )->p;
@@ -414,15 +433,23 @@ static PyObject* Context_createMaterial( PyObject* self, PyObject* args, PyObjec
 
   if( closest_hits )
   {
-    int num_closest_hits = PyList_Size( closest_hits );
+    if( !PySequence_Check( closest_hits ) )
+    {
+      rtMaterialDestroy( p );
+      PyErr_SetString( PyExc_RuntimeError, "Context.createMaterial passed non-sequence closest_hit_programs" );
+      return 0;
+    }
+
+    int num_closest_hits = PySequence_Size( closest_hits );
     for( int i = 0; i < num_closest_hits; ++i )
     {
-      PyObject* closest_hit = PyList_GetItem( closest_hits, i );
+      PyObject* closest_hit = PySequence_GetItem( closest_hits, i );
       if( closest_hit == Py_None ) /* TODO: check this is correct */
         continue;
       
       if( !PyObject_TypeCheck( closest_hit, &ProgramType ) )
       {
+        rtMaterialDestroy( p );
         PyErr_SetString( PyExc_RuntimeError, "Context.createMateriasl passed non-Program in closest_hit_programs list" );
         return 0;
       }
@@ -433,15 +460,23 @@ static PyObject* Context_createMaterial( PyObject* self, PyObject* args, PyObjec
   
   if( any_hits )
   {
-    int num_any_hits = PyList_Size( any_hits );
+    if( !PySequence_Check( any_hits ) )
+    {
+      rtMaterialDestroy( p );
+      PyErr_SetString( PyExc_RuntimeError, "Context.createMaterial passed non-sequence any_hit_programs" );
+      return 0;
+    }
+
+    int num_any_hits = PySequence_Size( any_hits );
     for( int i = 0; i < num_any_hits; ++i )
     {
-      PyObject* any_hit = PyList_GetItem( any_hits, i );
+      PyObject* any_hit = PySequence_GetItem( any_hits, i );
       if( any_hit == Py_None ) /* TODO: check this is correct */
         continue;
 
       if( !PyObject_TypeCheck( any_hit, &ProgramType ) )
       {
+        rtMaterialDestroy( p );
         PyErr_SetString( PyExc_RuntimeError, "Context.createMateriasl passed non-Program in any_hit_programs list" );
         return 0;
       }
@@ -468,9 +503,318 @@ static PyObject* Context_createProgramFromPTXFile( PyObject* self, PyObject* arg
 
   RTcontext context = ( ( Context* )self )->p;
   RTprogram  p = 0;
-  CHECK_RT_RESULT( rtProgramCreateFromPTXFile( context, filename, program, &p ), 0, "context.createProgram" );
+  CHECK_RT_RESULT( rtProgramCreateFromPTXFile( context, filename, program, &p ), context, "context.createProgram" );
 
   return Py_BuildValue( "O&", ProgramNew, p );
+}
+
+
+static PyObject* Context_createTextureSampler( PyObject* self, PyObject* args, PyObject* kwds )
+{
+  PyObject* wrap_mode            = 0; // (dimension, wrapmode) 
+  int       filter_minification  = 0;
+  int       filter_magnification = 0;
+  int       filter_mipmapping    = 0;
+  float     anisotropy_max       = 0.0f;
+  PyObject* miplevel_clamp       = 0; // (min, max)
+  float     miplevel_bias        = 0.0f;
+  int       read_mode            = -1;
+  int       indexing_mode        = -1;
+  Buffer*   buffer               = 0;
+
+
+  static char* kwlist[] = {
+    "wrap_mode",
+    "filter_minification",
+    "filter_magnification",
+    "filter_mipmapping",
+    "anisotropy_max",
+    "miplevel_clamp",
+    "miplevel_bias",
+    "read_mode",
+    "indexing_mode",
+    "buffer",
+    0
+  };
+
+
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|OiiifOfii!O:context.createTextureSampler", kwlist,
+        &wrap_mode,
+        &filter_minification,
+        &filter_magnification,
+        &filter_mipmapping,
+        &anisotropy_max,
+        &miplevel_clamp,
+        &miplevel_bias,
+        &read_mode,
+        &indexing_mode,
+        &BufferType,
+        &buffer
+        ) )
+    return 0; 
+  
+  RTcontext context = ( ( Context* )self )->p;
+  RTtexturesampler p = 0;
+  CHECK_RT_RESULT( rtTextureSamplerCreate( context, &p ), context, "context.createTextureSampler" );
+
+  if( wrap_mode )
+  {
+    if( !PySequence_Check( wrap_mode) )
+    {
+      PyErr_SetString( PyExc_RuntimeError, "Context.createTextureSampler passed non-sequence wrap_mode argument" );
+      return 0;
+    }
+
+    const int wrap_mode_size = PySequence_Size( wrap_mode );
+    if( wrap_mode_size != 2 )
+    {
+      PyErr_SetString( PyExc_RuntimeError, "Context.createTextureSampler passed wrap_mode with size != 2" );
+      rtTextureSamplerDestroy( p );
+      return 0;
+    }
+
+    PyObject* dim = PySequence_GetItem( wrap_mode, 0 );
+    PyObject* int_dim = PyNumber_Int( dim );
+    if( !int_dim )
+    {
+      PyErr_SetString(
+          PyExc_RuntimeError,
+          "Context.createTextureSampler passed non-int convertible wrap_mode dimension"
+          );
+      rtTextureSamplerDestroy( p );
+      return 0;
+    }
+    
+    PyObject* mode = PySequence_GetItem( wrap_mode, 1 );
+    PyObject* int_mode = PyNumber_Int( mode );
+    if( !int_mode )
+    {
+      PyErr_SetString(
+          PyExc_RuntimeError,
+          "Context.createTextureSampler passed non-int convertible wrap_mode mode"
+          );
+      rtTextureSamplerDestroy( p );
+      return 0;
+    }
+  
+    CHECK_RT_RESULT(
+        rtTextureSamplerSetWrapMode( p, PyInt_AsLong( int_dim ), PyInt_AsLong( int_mode ) ),
+        context,
+        "context.createTextureSampler"
+        );
+  }
+  
+  if( filter_minification || filter_magnification || filter_mipmapping )
+  {  
+    CHECK_RT_RESULT( 
+        rtTextureSamplerSetFilteringModes( p, filter_minification, filter_magnification, filter_mipmapping ),
+        context,
+        "context.createTextureSampler"
+        );
+  }
+
+  if( anisotropy_max != 0.0f )
+  {
+    CHECK_RT_RESULT( 
+        rtTextureSamplerSetMaxAnisotropy( p, anisotropy_max ), 
+        context,
+        "context.createTextureSampler"
+        );
+  }
+
+  if( miplevel_clamp )
+  {
+    if( !PySequence_Check( miplevel_clamp) )
+    {
+      PyErr_SetString( PyExc_RuntimeError, "Context.createTextureSampler passed non-sequence miplevel_clamp argument" );
+      return 0;
+    }
+
+    const int miplevel_clamp_size = PySequence_Size( miplevel_clamp );
+    if( miplevel_clamp_size != 2 )
+    {
+      PyErr_SetString( PyExc_RuntimeError, "Context.createTextureSampler passed miplevel_clamp with size != 2" );
+      rtTextureSamplerDestroy( p );
+      return 0;
+    }
+
+    PyObject* min = PySequence_GetItem( miplevel_clamp, 0 );
+    PyObject* float_min = PyNumber_Float( min );
+    if( !float_min )
+    {
+      PyErr_SetString(
+          PyExc_RuntimeError,
+          "Context.createTextureSampler passed non-float convertible miplevel_clamp min value"
+          );
+      rtTextureSamplerDestroy( p );
+      return 0;
+    }
+    
+    PyObject* max = PySequence_GetItem( miplevel_clamp, 1 );
+    PyObject* float_max = PyNumber_Float( max );
+    if( !float_max )
+    {
+      PyErr_SetString(
+          PyExc_RuntimeError,
+          "Context.createTextureSampler passed non-float convertible miplevel_clamp max_value"
+          );
+      rtTextureSamplerDestroy( p );
+      return 0;
+    }
+  
+    CHECK_RT_RESULT(
+        rtTextureSamplerSetMipLevelClamp( p, PyFloat_AsDouble( float_min ), PyFloat_AsDouble( float_max ) ),
+        context,
+        "context.createTextureSampler"
+        );
+  }
+
+  if( miplevel_bias != 0.0f )
+  {
+    CHECK_RT_RESULT(
+        rtTextureSamplerSetMipLevelBias( p, miplevel_bias ),
+        context,
+        "context.createTextureSampler"
+        );
+  }
+
+  if( read_mode != -1 )
+  {
+    CHECK_RT_RESULT(
+        rtTextureSamplerSetReadMode( p, read_mode ),
+        context,
+        "context.createTextureSampler"
+        );
+  }
+  
+  if( indexing_mode != -1 )
+  {
+    CHECK_RT_RESULT(
+        rtTextureSamplerSetIndexingMode( p, indexing_mode ),
+        context,
+        "context.createTextureSampler"
+        );
+  }
+
+  if( buffer )
+  {
+    const unsigned deprecated = 0;
+    CHECK_RT_RESULT(
+        rtTextureSamplerSetBuffer( p, deprecated, deprecated, buffer->p ),
+        context,
+        "context.createTextureSampler"
+        );
+  }
+
+  return Py_BuildValue( "O&", TextureSamplerNew, p );
+}
+
+
+static int get_matrix_data( PyObject* matrix, float matrix_data[16] )
+{
+  if( !PySequence_Check( matrix ) )
+  {
+    PyErr_SetString( PyExc_RuntimeError, "Context.createTransform passed non-sequence matrix argument" );
+    return 0;
+  }
+
+  const int matrix_size = PySequence_Size( matrix );
+  if( matrix_size != 16 )
+  {
+    PyErr_SetString( PyExc_RuntimeError, "Context.createTransform passed matrix with size != 16" );
+    return 0;
+  }
+
+  for( int i = 0; i < matrix_size; ++i )
+  {
+    PyObject* elmt = PySequence_GetItem( matrix, i );
+    PyObject* float_elmt = PyNumber_Float( elmt );
+    if( !float_elmt )
+    {
+      PyErr_SetString( PyExc_RuntimeError, "Context.createTransform passed matrix with non-float convertible element" );
+      return 0;
+    }
+    matrix_data[i] = PyFloat_AsDouble( float_elmt );
+  }
+  //fprintf( stderr, "%f, %f, %f\n\n", matrix_data[0], matrix_data[1], matrix_data[2] );
+
+  return 1;
+}
+
+
+static PyObject* Context_createTransform( PyObject* self, PyObject* args, PyObject* kwds )
+{
+  PyObject* child     = 0;
+  int       transpose = 0;
+  PyObject* matrix    = 0;
+  PyObject* inverse   = 0;
+
+
+  static char* kwlist[] = {
+    "child",
+    "transpose",
+    "matrix",
+    "inverse_matrix",
+    0
+  };
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "|OiOO:context.createTransform", kwlist,
+        &child, &transpose, &matrix, &inverse ) )
+    return 0; 
+
+  RTcontext context = ( ( Context* )self )->p;
+  RTtransform  p = 0;
+  CHECK_RT_RESULT( rtTransformCreate( context, &p ), context, "context.createTransform" );
+
+  if( child )
+  {
+      if( !PyObject_TypeCheck( child, &GroupType         ) &&
+          !PyObject_TypeCheck( child, &SelectorType      ) &&
+          !PyObject_TypeCheck( child, &GeometryGroupType ) &&
+          !PyObject_TypeCheck( child, &TransformType     )
+          )
+      {
+        PyErr_SetString( PyExc_RuntimeError, "Context.createTransform passed child with invalid type" );
+        return 0;
+      }
+      Group* group = (Group*)child; /* pick one of the allowed types randomly.  It will be typecast internally */
+      CHECK_RT_RESULT( rtTransformSetChild( p, group->p ), context, "context.createTransform" );
+  }
+
+  if( matrix )
+  {
+    float matrix_data[16] = {0.0f};
+    if( !get_matrix_data( matrix, matrix_data ) )
+    {
+      rtTransformDestroy( p );
+      return 0;
+    }
+    
+    float inverse_matrix_data[16] = {0.0f};
+    if( inverse )
+    {
+      if( !get_matrix_data( inverse, inverse_matrix_data ) )
+      {
+        rtTransformDestroy( p );
+        return 0;
+      }
+
+      CHECK_RT_RESULT( 
+          rtTransformSetMatrix( p, transpose, matrix_data, inverse_matrix_data ),
+          context,
+          "context.createTransform"
+          );
+    }
+    else
+    {
+      CHECK_RT_RESULT( 
+          rtTransformSetMatrix( p, transpose, matrix_data, 0 ),
+          context,
+          "context.createTransform"
+          );
+    }
+  }
+
+  return Py_BuildValue( "O&", TransformNew, p );
 }
 
 /*
@@ -484,7 +828,7 @@ static PyObject* Context_createAcceleration( PyObject* self, PyObject* args, PyO
 
   RTcontext context = ( ( Context* )self )->p;
   RTacceleration  p = 0;
-  CHECK_RT_RESULT( rtAccelerationCreate( context, &p ), 0, "context.createAcceleration" );
+  CHECK_RT_RESULT( rtAccelerationCreate( context, &p ), context, "context.createAcceleration" );
 
   return Py_BuildValue( "O&", AccelerationNew, p );
 }

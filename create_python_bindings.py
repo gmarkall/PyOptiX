@@ -54,6 +54,8 @@ custom_funcs = {
                                'createGroup',
                                'createMaterial',
                                'createProgramFromPTXFile',
+                               'createTextureSampler',
+                               'createTransform',
                                ],
         'optix'            : [ 'createContext' ],
         }
