@@ -34,15 +34,16 @@ class Sample5:
                 )
   
         xform = context.createTransform( 
-                matrix = [1.0, 0.0, 0.0, 0.0,
-                                                   0.0, 1.0, 0.0, 0.0,
-                                                   0.0, 0.0, 1.0, 0.0,
-                                                   0.0, 0.0, 0.0, 1.0 ],
-                inverse_matrix = [3.0, 4, 1.12, 0.0,
-                                                   0.0, 1.0, 0.0, 0.0,
-                                                   0.0, 0.0, 1.0, 0.0,
-                                                   0.0, 0.0, 0.0, 1.0 ],
-                                                   )
+                matrix =         [ 1.0, 0.0, 0.0, 0.0,
+                                   0.0, 1.0, 0.0, 0.0,
+                                   0.0, 0.0, 1.0, 0.0,
+                                   0.0, 0.0, 0.0, 1.0 ],
+                inverse_matrix = [ 3.0, 4.0, 1.2, 0.0,
+                                   0.0, 1.0, 0.0, 0.0,
+                                   0.0, 0.0, 1.0, 0.0,
+                                   0.0, 0.0, 0.0, 1.0 ],
+                )
+
         context[ 'radiance_ray_type_int' ].setInt( 0 )
         context[ 'radiance_ray_type' ].setUint( 0 )
         v = context[ 'scene_epsilon'     ]
