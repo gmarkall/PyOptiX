@@ -1,10 +1,34 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import optix 
 import os
 import sys 
 #import Image
 import numpy
+
+def write_png(buf, width, height):
+    """
+    buf: must be bytes or a bytearray in py3, a regular string in py2.
+    formatted RGBARGBA...
+    """
+    import zlib, struct
+
+    # reverse the vertical line order and add null bytes at the start
+    width_byte_4 = width * 4
+    raw_data = b''.join(b'\x00' + buf[span:span + width_byte_4]
+                        for span in range((height - 1) * width * 4, -1, - width_byte_4))
+
+    def png_pack(png_tag, data):
+        chunk_head = png_tag + data
+        return (struct.pack("!I", len(data)) +
+                chunk_head +
+                struct.pack("!I", 0xFFFFFFFF & zlib.crc32(chunk_head)))
+
+    return b''.join([
+        b'\x89PNG\r\n\x1a\n',
+        png_pack(b'IHDR', struct.pack("!2I5B", width, height, 8, 6, 0, 0, 0)),
+        png_pack(b'IDAT', zlib.compress(raw_data, 9)),
+        png_pack(b'IEND', b'')])
 
 class Sample5:
 
@@ -128,49 +152,55 @@ class Sample5:
   
 
     def run( self ):
-        print "here 0"
+        print( "here 0" )
         self.context  = self.createContext()
-        print "here 1"
+        print( "here 1" )
         self.sphere   = self.createGeometry()
-        print "here 2"
+        print( "here 2" )
         self.material = self.createMaterial()
-        print "here 3"
+        print( "here 3" )
         self.createInstance()
   
-        print "here 4"
+        print( "here 4" )
         self.context.validate()
-        print "here 5"
+        print( "here 5" )
         self.context.compile()
-        print "here 6"
+        print( "here 6" )
         self.context.launch2D( 0, self.WIDTH, self.HEIGHT)
   
         # display
-        print "here 7"
-        #print 'Map: ' + str( self.output_buffer.map() )
+        print( "here 7" )
+        #print( 'Map: ' + str( self.output_buffer.map() )
         #self.output_buffer.writeToPPM "foo.ppm" 
 
         array = self.output_buffer.map()
-        print array.size
-        print array.shape
-        #print dir( array )
-        with open( 'output.ppm', 'wb' ) as image_file:
-            print >> image_file, 'P3'
-            print >> image_file, '{} {}'.format( array.shape[0], array.shape[1] )
-            print >> image_file, '255'
+        print( array.size )
+        print( array.shape )
+        data = write_png( array.tostring(), array.shape[0], array.shape[1] )
+        with open("my_image.png", 'wb') as fd:
+            fd.write(data)
+
+        '''
+        #print( dir( array )
+        with open( 'output.ppm', 'wb' ) as ifile:
+            ifile.write( bytes( 'P3', 'UTF-8' ) )
+            ifile.write( bytes( '{} {}'.format(array.shape[0], array.shape[1]), 'UTF-8' ) )
+            ifile.write( bytes( '255', 'UTF-8' ) )
 
             for i in range( array.shape[0] ):
                 for j in range( array.shape[1] ):
-                    print >> image_file, '{}'.format( array[i][j][2] ),
-                    print >> image_file, '{}'.format( array[i][j][1] ),
-                    print >> image_file, '{}'.format( array[i][j][0] ),
+                    ifile.write( bytes( '{}'.format(array[i][j][2]), 'UTF-8' ) )
+                    ifile.write( bytes( '{}'.format(array[i][j][1]), 'UTF-8' ) )
+                    ifile.write( bytes( '{}'.format(array[i][j][2]), 'UTF-8' ) )
             #flat = array.flatten( 'A' )
             #for i in flat:
-            #    print >> image_file, '{}'.format( i ),
+            #    print( >> image_file, '{}'.format( i ),
 
+       '''
             
   
         self.context.destroy()
-        print "here 8"
+        print( "here 8" )
   
   
 ptx_path = sys.argv[1]

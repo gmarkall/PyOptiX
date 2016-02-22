@@ -70,7 +70,7 @@ custom_funcs = {
 
 type_reg_template = string.Template( '''
   if( PyType_Ready( &${rt_type}Type ) < 0 )
-    return;
+    return NULL;
   Py_INCREF( &${rt_type}Type );
   PyModule_AddObject(
       mod,
@@ -112,7 +112,7 @@ type_template = string.Template( '''
 
 static void ${rt_type}_dealloc( ${rt_type}* self )
 {
-  self->ob_type->tp_free((PyObject*)self);
+  Py_TYPE( self )->tp_free((PyObject*)self);
 }
 
 
@@ -122,8 +122,7 @@ ${rt_type_getitem}
 
 static PyTypeObject ${rt_type}Type =
 {
-    PyObject_HEAD_INIT(NULL)
-    0,                         /*ob_size*/
+    PyVarObject_HEAD_INIT(NULL, 0)
     "optix.${rt_type}",        /*tp_name*/
     sizeof(${rt_type}),        /*tp_basicsize*/
     0,                         /*tp_itemsize*/
@@ -300,10 +299,24 @@ ${type_decls}
 getitem_template = string.Template( '''
 static PyObject* ${rt_type}GetItem( PyObject* self, PyObject* key )
 {
-  if( !PyString_Check( key ) )
+  if( !PyUnicode_Check( key ) ) 
+  {
     PyErr_SetString( PyExc_TypeError, "${rt_type}.getItem() called with non-string key" );
+    return 0;
+  }
 
-  const char* str = PyString_AsString( key ); 
+  PyObject * temp_bytes = PyUnicode_AsEncodedString( key, "ASCII", "strict" );
+  const char* str = NULL;
+  if (temp_bytes != NULL)
+  {
+    str = PyBytes_AS_STRING( temp_bytes );
+    str = strdup( str );
+    Py_DECREF( temp_bytes );
+  } else {
+    PyErr_SetString( PyExc_TypeError, "${rt_type}.getItem() called with non-askii key" );
+    return 0;
+  }
+
   ${opaque_type} p = ( (${rt_type}*)self )->p;
 
   RTvariable v;
@@ -331,18 +344,33 @@ ${types}
 
 ${module_methods}
 
-void initoptix()
+static struct PyModuleDef module_def =
+{
+  PyModuleDef_HEAD_INIT,
+  "optix",
+  NULL,
+  -1,
+  optix_methods,
+  NULL,
+  NULL,
+  NULL,
+  NULL
+};
+
+PyObject* PyInit_optix()
 {
   Py_Initialize();
   import_array();
 
-  PyObject* mod = Py_InitModule("optix", optix_methods);
+  PyObject* mod = PyModule_Create( &module_def );
 
 ${type_registrations}
 
   PyObject* v = 0;
 
 ${enum_registrations}
+
+  return mod;
 }
         
 ''')
@@ -570,7 +598,7 @@ def create_method_code( rt_type, method_name, func ):
     #for param in params:
     for param in params[1 if rt_type else 0:]:
         if param[0] not in C_to_Py:
-            print >> sys.stderr, '*************NOT FOUND \'{}\''.format( param[0] )
+            print( '*************NOT FOUND \'{}\''.format( param[0] ), file=sys.stderr )
 
         ( param_type, param_format_str, param_init, arg_decorator, parse_arg_decorator ) = C_to_Py[ param[0] ]
         arg_decls += '  {} {}{};\n'.format( param_type, param[1], param_init )
@@ -786,20 +814,20 @@ enums = parse_enums()
 funcs = parse_funcs()
 
 
-print >> sys.stderr, '\n*********** Generating optix module ***********\n'
+print( '\n*********** Generating optix module ***********\n', file=sys.stderr )
 
 ( type_decls, type_defs ) = create_types( funcs )
 
 with open( 'PyOptiXDecls.h', 'w' ) as decls_file:
-    print >> decls_file, decls_file_template.substitute(
-            type_decls = type_decls
-            )
+    print( decls_file_template.substitute( type_decls=type_decls ),
+           file=decls_file )
 
 with open( 'PyOptiXModule.c', 'w' ) as module_file:
-    print >> module_file, module_file_template.substitute(
+    print( module_file_template.substitute(
         types              = type_defs,
         module_methods     = create_module_methods( funcs[ None ] ),
         type_registrations = create_type_registrations(),
         enum_registrations = create_enum_registrations( enums )
-        )
+        ),
+        file=module_file )
 

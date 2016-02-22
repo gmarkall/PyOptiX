@@ -574,7 +574,7 @@ static PyObject* Context_createTextureSampler( PyObject* self, PyObject* args, P
     }
 
     PyObject* dim = PySequence_GetItem( wrap_mode, 0 );
-    PyObject* int_dim = PyNumber_Int( dim );
+    PyObject* int_dim = PyNumber_Long( dim );
     if( !int_dim )
     {
       PyErr_SetString(
@@ -586,7 +586,7 @@ static PyObject* Context_createTextureSampler( PyObject* self, PyObject* args, P
     }
     
     PyObject* mode = PySequence_GetItem( wrap_mode, 1 );
-    PyObject* int_mode = PyNumber_Int( mode );
+    PyObject* int_mode = PyNumber_Long( mode );
     if( !int_mode )
     {
       PyErr_SetString(
@@ -598,7 +598,7 @@ static PyObject* Context_createTextureSampler( PyObject* self, PyObject* args, P
     }
   
     CHECK_RT_RESULT(
-        rtTextureSamplerSetWrapMode( p, PyInt_AsLong( int_dim ), PyInt_AsLong( int_mode ) ),
+        rtTextureSamplerSetWrapMode( p, PyLong_AsLong( int_dim ), PyLong_AsLong( int_mode ) ),
         context,
         "context.createTextureSampler"
         );
