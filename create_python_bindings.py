@@ -38,7 +38,7 @@ custom_types = [
 custom_funcs = {
         'Variable'         : [ 'setUint', 'setInt', 'setFloat' ],
         'Acceleration'     : [],
-        'Buffer'           : [],
+        'Buffer'           : [ 'shape', 'size' ],
         'GeometryGroup'    : [],
         'GeometryInstance' : [],
         'Geometry'         : [],
@@ -360,7 +360,7 @@ static struct PyModuleDef module_def =
   NULL
 };
 
-PyObject* PyInit_optix()
+PyObject* PyInit_optix(void)
 {
   Py_Initialize();
   //import_array();

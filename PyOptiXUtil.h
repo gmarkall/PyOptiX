@@ -157,12 +157,12 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
 typedef struct 
 {
     PyObject_HEAD
-    char      elmt_format;
-    int       elmt_size;
-    int       elmt_dims;
-    RTsize    dims[3];
-    void*     data;
-    RTbuffer  rt_buffer;
+    char       elmt_format[2];
+    Py_ssize_t elmt_size;
+    Py_ssize_t elmt_dims;
+    Py_ssize_t length;
+    void*      data;
+    RTbuffer   rt_buffer;
 
 } MappedBuffer;
 
@@ -188,7 +188,12 @@ static PyObject* MappedBufferNew( void* p )
 */
 
 
-static void getElmtInfo( RTformat format, char* elmt_type, int* elmt_size, int* elmt_dimensionality )
+static void getElmtInfo(
+        RTformat format,
+        char* elmt_type,
+        Py_ssize_t* elmt_size,
+        Py_ssize_t* elmt_dimensionality
+        )
 {
     switch( format ) {
         case RT_FORMAT_HALF:
@@ -295,20 +300,7 @@ static PyObject* MappedBuffer_size( MappedBuffer* self, PyObject* args, PyObject
   }                                                                              
 
   //return Py_BuildValue( "i", Py_SIZE( self ) );
-  return Py_BuildValue( "i", self->dims[0]*self->dims[1]*self->dims[2] );
-}
-
-
-static PyObject* MappedBuffer_shape( MappedBuffer* self, PyObject* args, PyObject* kwds )
-{
-  if( !self->data )                                                                 
-  {                                                                                 
-    PyErr_SetString( PyExc_RuntimeError, "MappedBuffer.length() called on uninitialized object" );
-    return 0;                                                                    
-  }                                                                              
-
-  //return Py_BuildValue( "i", Py_SIZE( self ) );
-  return Py_BuildValue( "(iii)", self->dims[0],self->dims[1],self->dims[2] );
+  return Py_BuildValue( "i", self->length );
 }
 
 
@@ -316,9 +308,7 @@ Py_ssize_t MappedBuffer_numbytes( MappedBuffer* self )
 {
   return (Py_ssize_t)self->elmt_size *
          (Py_ssize_t)self->elmt_dims *
-         (Py_ssize_t)self->dims[0]   *
-         (Py_ssize_t)self->dims[1]   *
-         (Py_ssize_t)self->dims[2];
+         (Py_ssize_t)self->length;
 }
 
 
@@ -354,13 +344,6 @@ static PyMethodDef MappedBuffer_methods[] =
     },                                                                             
     
     {                                                                              
-        "shape",                                                                    
-        (PyCFunction)MappedBuffer_shape,                                            
-        METH_VARARGS | METH_KEYWORDS,                                                
-        "Shape of mapped buffer (width, height, depth)"
-    },                                                                             
-    
-    {                                                                              
         "tostring",                                                                    
         (PyCFunction)MappedBuffer_tostring,                                            
         METH_VARARGS | METH_KEYWORDS,                                                
@@ -378,24 +361,35 @@ static PyMethodDef MappedBuffer_methods[] =
 };
 
 
-static Py_ssize_t MappedBuffer_sq_length( PyObject* a )
+static int
+MappedBuffer_getbuf( MappedBuffer* self, Py_buffer *view, int flags )
 {
-    return Py_SIZE(a);
+    if( view == NULL )
+    {
+        PyErr_SetString(PyExc_BufferError,
+                "MappedBuffer_getbuf requires non-NULL view");
+        return -1;
+    }
+
+    view->buf         = self->data;
+    view->obj         = (PyObject*)self;
+    Py_INCREF(self);
+    view->len         = MappedBuffer_numbytes( self );
+    view->readonly    = 0;
+    view->itemsize    = self->elmt_size;
+    view->format      = self->elmt_format;
+    view->ndim        = 1;
+    view->shape       = &self->length;
+    view->strides     = &self->elmt_size;
+    view->suboffsets  = NULL;
+    return 0;
 }
 
 
-static PySequenceMethods MappedBuffer_sequence =
-{ 
-    MappedBuffer_sq_length,                        /*sq_length*/
-    0,                                          /*sq_concat*/
-    0,                                          /*sq_repeat*/
-    0,                                          /*sq_item*/
-    0,                                          /*sq_slice*/
-    0,                                          /*sq_ass_item*/
-    0,                                          /*sq_ass_slice*/
-    0,                                          /*sq_contains*/
-    0,                                          /*sq_inplace_concat*/
-    0                                           /*sq_inplace_repeat*/
+static PyBufferProcs MappedBuffer_as_buf =
+{
+    (getbufferproc)MappedBuffer_getbuf,
+    (releasebufferproc)0  // we do not require any special release function
 };
 
 
@@ -414,16 +408,18 @@ static PyObject* createMappedBuffer( RTbuffer buffer, void* data )
     RTformat rt_format;
     rtBufferGetFormat( buffer, &rt_format );
 
-    getElmtInfo( rt_format, &self->elmt_format, &self->elmt_size, &self->elmt_dims );
+    getElmtInfo( rt_format, &self->elmt_format[0], &self->elmt_size, &self->elmt_dims );
+    self->elmt_format[1] = '\0';
 
-
-    rtBufferGetSize3D( buffer, self->dims+0, self->dims+1, self->dims+2 );
-
+    RTsize dims[3];
+    rtBufferGetSize3D( buffer, dims+0, dims+1, dims+2 );
+    self->length = dims[0]*dims[1]*dims[2];
     self->data = data;
     self->rt_buffer = buffer;
 
     return (PyObject*)self;
 }
+
 
 static PyTypeObject MappedBufferType =
 {
@@ -445,7 +441,7 @@ static PyTypeObject MappedBufferType =
     0,                         /*tp_str*/
     0,                         /*tp_getattro*/
     0,                         /*tp_setattro*/
-    0,                         /*tp_as_buffer*/
+    &MappedBuffer_as_buf,      /*tp_as_buffer*/
     Py_TPFLAGS_DEFAULT,        /*tp_flags*/
     "MappedBuffer objects",    /* tp_doc */
     0,                         /* tp_traverse */
@@ -1155,7 +1151,7 @@ static PyObject* Context_createAcceleration( PyObject* self, PyObject* args, PyO
 
 //------------------------------------------------------------------------------
 //
-// Additional ariable setters 
+// Additional variable setters 
 //
 //------------------------------------------------------------------------------
 
@@ -1225,3 +1221,50 @@ static PyObject* Variable_setFloat( PyObject* self, PyObject* args, PyObject* kw
 }
 
 
+//------------------------------------------------------------------------------
+//
+// Misc helpers 
+//
+//------------------------------------------------------------------------------
+
+
+static PyObject* Buffer_size( Buffer* self, PyObject* args, PyObject* kwds )
+{
+  if( !self->p )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "Buffer.shape() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+
+  static char* kwlist[] = { 0 };
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "", kwlist ) )
+    return NULL;
+                                                                                 
+  RTcontext ctx;                                                               
+  rtBufferGetContext( self->p, &ctx );                                          
+  RTsize dims[3];
+  CHECK_RT_RESULT( rtBufferGetSizev( self->p, 3, dims ), ctx, "Buffer.shape()" );
+
+  return Py_BuildValue( "(iii)", dims[0], dims[1], dims[2] );
+}
+
+
+static PyObject* Buffer_shape( Buffer* self, PyObject* args, PyObject* kwds )
+{
+  if( !self->p )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "Buffer.shape() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+
+  static char* kwlist[] = { 0 };
+  if( !PyArg_ParseTupleAndKeywords( args, kwds, "", kwlist ) )
+    return NULL;
+                                                                                 
+  RTcontext ctx;                                                               
+  rtBufferGetContext( self->p, &ctx );                                          
+  RTsize dims[3];
+  CHECK_RT_RESULT( rtBufferGetSizev( self->p, 3, dims ), ctx, "Buffer.shape()" );
+
+  return Py_BuildValue( "(iii)", dims[0], dims[1], dims[2] );
+}
