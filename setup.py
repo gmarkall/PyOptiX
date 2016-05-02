@@ -1,15 +1,15 @@
 from distutils.core import setup, Extension
-import numpy
 
+
+optix_path = '/home/kmorley/Code/rtsdk/rtmain/'
 module1 = Extension(
         'optix', 
         sources       = [ 'PyOptiXModule.c' ],
         depends       = [ 'PyOptiXUtil.h', 'PyOptiXDecls.h' ],
-        libraries     = [ 'optix', 'System' ],
-        #include_dirs  = [ '/Users/kmorley/Code/rtsdk/rtmain/include', numpy.get_include()  ],
-        #library_dirs  = [ '/Users/kmorley/Code/rtsdk/rtmain/build_debug/lib' ],
-        include_dirs  = [ '/Users/keith/Code/rtsdk/rtmain/include', numpy.get_include() ],
-        library_dirs  = [ '/Users/keith/Code/rtsdk/rtmain/build_debug/lib' ],
+        libraries     = [ 'optix' ],
+        include_dirs  = [ '{}/include'.format( optix_path ) ],
+        library_dirs  = [ '{}/build_debug/lib'.format( optix_path ) ],
+        extra_compile_args = ['-std=c99', '-g']
         )
 
 setup(

@@ -6,31 +6,34 @@ import sys
 import string
 
 lexical_scopes = [
-    'Context',
-    'Program',
-    'Selector',
-    'GeometryInstance',
-    'Geometry',
-    'Material'
-    ]
+        'Context',
+        'Program',
+        'Selector',
+        'GeometryInstance',
+        'Geometry',
+        'Material'
+        ]
 
 
 rt_types = [
-    'Variable',     # Needs to be before lexical scopes
-    'Acceleration',
-    'Buffer',
-    'GeometryGroup',
-    'GeometryInstance',
-    'Geometry',
-    'Group',
-    'Material',
-    'Program',
-    'RemoteDevice',
-    'Selector',
-    'TextureSampler',
-    'Transform',
-    'Context',      # needs to be last since it acts as factory
-    ]
+        'Variable',     # Needs to be before lexical scopes
+        'Acceleration',
+        'Buffer',
+        'GeometryGroup',
+        'GeometryInstance',
+        'Geometry',
+        'Group',
+        'Material',
+        'Program',
+        'RemoteDevice',
+        'Selector',
+        'TextureSampler',
+        'Transform',
+        'Context',      # needs to be last since it acts as factory
+        ]
+custom_types = [
+        'MappedBuffer',
+        ]
 
 custom_funcs = {
         'Variable'         : [ 'setUint', 'setInt', 'setFloat' ],
@@ -360,7 +363,7 @@ static struct PyModuleDef module_def =
 PyObject* PyInit_optix()
 {
   Py_Initialize();
-  import_array();
+  //import_array();
 
   PyObject* mod = PyModule_Create( &module_def );
 
@@ -507,7 +510,7 @@ C_to_Py = {
         'const char**'              : ( 'const char*'       , 's' ,  '=0'          , '&{}'      ,  '{}'                        ),
         'void*'                     : ( 'void*'             , 'i' ,  '=0'          , '{}'       ,  '{}'                         ),
         'const void*'               : ( 'const char'        , 'O' ,  '[1024]={0}'  , '{}'       ,  '{}'                         ),
-        'void**'                    : ( 'void*'             , 'O' ,  '=0'          , '&{}'      ,  'createNumpyArray( self->p, {} )' ),
+        'void**'                    : ( 'void*'             , 'O' ,  '=0'          , '&{}'      ,  'createMappedBuffer( self->p, {} )' ),
         'RTsize'                    : ( 'RTsize'            , 'n' ,  '=0'          , '{}'       ,  '&{}'                         ),
         'RTsize*'                   : ( 'RTsize'            , ''  ,  '=0'          , '&{}'      ,  '{}'                        ),
         'const RTsize*'             : ( 'RTsize'            , ''  ,  '[3]={0ull}'  , '{}'       ,  '{}'                         ),
@@ -785,7 +788,7 @@ def create_types( funcs ):
 
 def create_type_registrations():
     type_registrations = ''
-    for rt_type in rt_types:
+    for rt_type in rt_types + custom_types:
         type_registrations += type_reg_template.substitute( rt_type=rt_type )
     return type_registrations
 

@@ -3,8 +3,6 @@
 import optix 
 import os
 import sys 
-#import Image
-import numpy
 
 def write_png(buf, width, height):
     """
@@ -174,11 +172,18 @@ class Sample5:
         #self.output_buffer.writeToPPM "foo.ppm" 
 
         array = self.output_buffer.map()
-        print( array.size )
-        print( array.shape )
-        data = write_png( array.tostring(), array.shape[0], array.shape[1] )
+        print( "here 7.01" )
+        print( array )
+        print( "here 7.1" )
+        print( array.size() )
+        print( "here 7.2" )
+        print( array.shape() )
+        print( "here 7.3" )
+        data = write_png( array.tostring(), array.shape()[0], array.shape()[1] )
+        print( "here 7.4" )
         with open("my_image.png", 'wb') as fd:
             fd.write(data)
+        print( "here 7.5" )
 
         '''
         #print( dir( array )

@@ -1,10 +1,10 @@
 
-#include "PyOptixDecls.h"
+
+
+
+#include "PyOptiXDecls.h"
+
 #include <stdio.h>
-
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-#include <numpy/arrayobject.h>
-
 
 // TODO: right now we leak created optix objects if the creation process fails
 #define CHECK_RT_RESULT( res, ctx, py_funcname )                                \
@@ -23,6 +23,13 @@ do {                                                                            
 
 
 
+//------------------------------------------------------------------------------
+//
+// Numpy buffer map support 
+//
+//------------------------------------------------------------------------------
+
+#if 0
 static void getNumpyElementType( RTformat format, int* element_py_array_type, unsigned int* element_dimensionality )
 {
   switch( format )
@@ -131,21 +138,6 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
   dims[ dimensionality ] = element_dimensionality;
   dimensionality += (int)( element_dimensionality > 1 );
 
-  /*
-  npy_intp strides[4];
-  strides[0] = element_dimensionality;
-  strides[1] = element_dimensionality*dims[0];
-  strides[2] = 1; 
-  return PyArray_NewFromDescr(
-      &PyArray_Type, 
-      PyArray_DescrFromType( element_py_array_type ),
-      dimensionality,
-      dims, 
-      0, 
-      data, 
-      NPY_ARRAY_C_CONTIGUOUS,
-      0 );
-      */
   return PyArray_SimpleNewFromData(
       dimensionality,
       dims,
@@ -154,6 +146,332 @@ static PyObject* createNumpyArray( RTbuffer buffer, void* data )
       );
 }
 
+#endif
+
+//------------------------------------------------------------------------------
+//
+// Custom MappedBuffer support 
+//
+//------------------------------------------------------------------------------
+
+typedef struct 
+{
+    PyObject_HEAD
+    char      elmt_format;
+    int       elmt_size;
+    int       elmt_dims;
+    RTsize    dims[3];
+    void*     data;
+    RTbuffer  rt_buffer;
+
+} MappedBuffer;
+
+static PyTypeObject MappedBufferType;
+
+/*
+static PyObject* MappedBufferNew( void* p )
+{
+    MappedBuffer* self = (MappedBuffer*)PyObject_New( MappedBuffer, &MappedBufferType );
+    if( !self )
+        return 0;
+
+    RTbuffer buf = (RTbuffer)p;
+    self->elmt_format = '\0';
+    self->elmt_dims   = 0;
+    self->dims[0]     = 0;
+    self->dims[1]     = 0;
+    self->dims[2]     = 0;
+    self->data
+    rtBufferMap( buf, &self->data );
+    return (PyObject*)self;
+}
+*/
+
+
+static void getElmtInfo( RTformat format, char* elmt_type, int* elmt_size, int* elmt_dimensionality )
+{
+    switch( format ) {
+        case RT_FORMAT_HALF:
+        case RT_FORMAT_HALF2:
+        case RT_FORMAT_HALF3:
+        case RT_FORMAT_HALF4:
+            *elmt_type  = 'H';
+            *elmt_size  = '2';
+            *elmt_dimensionality = 1 + format - RT_FORMAT_HALF;
+            return;
+
+        case RT_FORMAT_FLOAT:
+        case RT_FORMAT_FLOAT2:
+        case RT_FORMAT_FLOAT3:
+        case RT_FORMAT_FLOAT4:
+            *elmt_type  = 'f';
+            *elmt_size  = '4';
+            *elmt_dimensionality = 1 + format - RT_FORMAT_FLOAT;
+            return;
+
+        case RT_FORMAT_BYTE:
+        case RT_FORMAT_BYTE2:
+        case RT_FORMAT_BYTE3:
+        case RT_FORMAT_BYTE4:
+            *elmt_type  = 'b';
+            *elmt_size  = '1';
+            *elmt_dimensionality = 1 + format - RT_FORMAT_BYTE;
+            return;
+
+        case RT_FORMAT_UNSIGNED_BYTE:
+        case RT_FORMAT_UNSIGNED_BYTE2:
+        case RT_FORMAT_UNSIGNED_BYTE3:
+        case RT_FORMAT_UNSIGNED_BYTE4:
+            *elmt_type  = 'B';
+            *elmt_size  = '1';
+            *elmt_dimensionality = 1 + format - RT_FORMAT_UNSIGNED_BYTE;
+            return;
+
+        case RT_FORMAT_SHORT:
+        case RT_FORMAT_SHORT2:
+        case RT_FORMAT_SHORT3:
+        case RT_FORMAT_SHORT4:
+            *elmt_type  = 'h';
+            *elmt_size  = '2';
+            *elmt_dimensionality = 1 + format - RT_FORMAT_SHORT;
+            return;
+
+        case RT_FORMAT_UNSIGNED_SHORT:
+        case RT_FORMAT_UNSIGNED_SHORT2:
+        case RT_FORMAT_UNSIGNED_SHORT3:
+        case RT_FORMAT_UNSIGNED_SHORT4:
+            *elmt_type  = 'H';
+            *elmt_size  = '2';
+            *elmt_dimensionality = 1 + format - RT_FORMAT_UNSIGNED_SHORT;
+            return;
+
+        case RT_FORMAT_INT:
+        case RT_FORMAT_INT2:
+        case RT_FORMAT_INT3:
+        case RT_FORMAT_INT4:
+            *elmt_type  = 'i';
+            *elmt_size  = '4';
+            *elmt_dimensionality = 1 + format - RT_FORMAT_INT;
+            return;
+
+        case RT_FORMAT_UNSIGNED_INT:
+        case RT_FORMAT_UNSIGNED_INT2:
+        case RT_FORMAT_UNSIGNED_INT3:
+        case RT_FORMAT_UNSIGNED_INT4:
+            *elmt_type  = 'I';
+            *elmt_size  = '4';
+            *elmt_dimensionality = 1 + format - RT_FORMAT_UNSIGNED_INT;
+            return;
+
+        case RT_FORMAT_BUFFER_ID:
+        case RT_FORMAT_PROGRAM_ID:
+            *elmt_type  = 'i';
+            *elmt_size  = '4';
+            *elmt_dimensionality = 1;
+            return;
+
+        case RT_FORMAT_USER:
+        case RT_FORMAT_UNKNOWN:
+            *elmt_type  = 'B';
+            *elmt_size  = '1';
+            *elmt_dimensionality = 1;
+            return;
+    }
+}
+
+
+static void MappedBuffer_dealloc( MappedBuffer* self )                           
+{                                                                                
+    Py_TYPE( self )->tp_free((PyObject*)self);                                     
+}                                                                                
+
+
+static PyObject* MappedBuffer_size( MappedBuffer* self, PyObject* args, PyObject* kwds )
+{
+  if( !self->data )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "MappedBuffer.length() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+
+  //return Py_BuildValue( "i", Py_SIZE( self ) );
+  return Py_BuildValue( "i", self->dims[0]*self->dims[1]*self->dims[2] );
+}
+
+
+static PyObject* MappedBuffer_shape( MappedBuffer* self, PyObject* args, PyObject* kwds )
+{
+  if( !self->data )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "MappedBuffer.length() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+
+  //return Py_BuildValue( "i", Py_SIZE( self ) );
+  return Py_BuildValue( "(iii)", self->dims[0],self->dims[1],self->dims[2] );
+}
+
+
+Py_ssize_t MappedBuffer_numbytes( MappedBuffer* self )
+{
+  return (Py_ssize_t)self->elmt_size *
+         (Py_ssize_t)self->elmt_dims *
+         (Py_ssize_t)self->dims[0]   *
+         (Py_ssize_t)self->dims[1]   *
+         (Py_ssize_t)self->dims[2];
+}
+
+
+static PyObject* MappedBuffer_tostring( MappedBuffer* self, PyObject* args, PyObject* kwds )
+{
+  if( !self->data )                                                                 
+  {                                                                                 
+    PyErr_SetString( PyExc_RuntimeError, "MappedBuffer.tostring() called on uninitialized object" );
+    return 0;                                                                    
+  }                                                                              
+
+  const Py_ssize_t num_bytes = MappedBuffer_numbytes( self );
+  if ( num_bytes <= PY_SSIZE_T_MAX )
+  {
+      return PyBytes_FromStringAndSize( self->data, num_bytes );
+  }
+  else
+  {
+      return PyErr_NoMemory();
+  }
+  return 0;
+}
+
+
+static PyMethodDef MappedBuffer_methods[] =                                      
+{                                                                                
+
+    {                                                                              
+        "size",                                                                    
+        (PyCFunction)MappedBuffer_size,                                            
+        METH_VARARGS | METH_KEYWORDS,                                                
+        "Total size of mapped buffer (ie, product of the buffer's dimensions)"
+    },                                                                             
+    
+    {                                                                              
+        "shape",                                                                    
+        (PyCFunction)MappedBuffer_shape,                                            
+        METH_VARARGS | METH_KEYWORDS,                                                
+        "Shape of mapped buffer (width, height, depth)"
+    },                                                                             
+    
+    {                                                                              
+        "tostring",                                                                    
+        (PyCFunction)MappedBuffer_tostring,                                            
+        METH_VARARGS | METH_KEYWORDS,                                                
+        "Return byte string of the underlying memory"
+    },                                                                             
+    
+    {                                                                              
+        "tobytes",                                                                    
+        (PyCFunction)MappedBuffer_tostring,                                            
+        METH_VARARGS | METH_KEYWORDS,                                                
+        "Return byte string of the underlying memory"
+    },                                                                             
+
+    {NULL}  /* Sentinel */                                                         
+};
+
+
+static Py_ssize_t MappedBuffer_sq_length( PyObject* a )
+{
+    return Py_SIZE(a);
+}
+
+
+static PySequenceMethods MappedBuffer_sequence =
+{ 
+    MappedBuffer_sq_length,                        /*sq_length*/
+    0,                                          /*sq_concat*/
+    0,                                          /*sq_repeat*/
+    0,                                          /*sq_item*/
+    0,                                          /*sq_slice*/
+    0,                                          /*sq_ass_item*/
+    0,                                          /*sq_ass_slice*/
+    0,                                          /*sq_contains*/
+    0,                                          /*sq_inplace_concat*/
+    0                                           /*sq_inplace_repeat*/
+};
+
+
+static PyObject* createMappedBuffer( RTbuffer buffer, void* data )
+{
+    MappedBuffer* self = (MappedBuffer*)PyObject_New( MappedBuffer, &MappedBufferType );
+    if( !self )
+        return 0;
+    
+    if( !buffer )
+        return 0;
+    
+    if( !data )
+        return 0;
+
+    RTformat rt_format;
+    rtBufferGetFormat( buffer, &rt_format );
+
+    getElmtInfo( rt_format, &self->elmt_format, &self->elmt_size, &self->elmt_dims );
+
+
+    rtBufferGetSize3D( buffer, self->dims+0, self->dims+1, self->dims+2 );
+
+    self->data = data;
+    self->rt_buffer = buffer;
+
+    return (PyObject*)self;
+}
+
+static PyTypeObject MappedBufferType =
+{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "optix.MappedBuffer",      /*tp_name*/
+    sizeof(MappedBuffer),      /*tp_basicsize*/
+    0,                         /*tp_itemsize*/
+    (destructor)MappedBuffer_dealloc,/*tp_dealloc*/
+    0,                         /*tp_print*/
+    0,                         /*tp_getattr*/
+    0,                         /*tp_setattr*/
+    0,                         /*tp_compare*/
+    0,                         /*tp_repr*/
+    0,                         /*tp_as_number*/
+    0,                         /*tp_as_sequence*/
+    0,                         /*tp_as_mapping*/
+    0,                         /*tp_hash */
+    0,                         /*tp_call*/
+    0,                         /*tp_str*/
+    0,                         /*tp_getattro*/
+    0,                         /*tp_setattro*/
+    0,                         /*tp_as_buffer*/
+    Py_TPFLAGS_DEFAULT,        /*tp_flags*/
+    "MappedBuffer objects",    /* tp_doc */
+    0,                         /* tp_traverse */
+    0,                         /* tp_clear */
+    0,                         /* tp_richcompare */
+    0,                         /* tp_weaklistoffset */
+    0,                         /* tp_iter */
+    0,                         /* tp_iternext */
+    MappedBuffer_methods,      /* tp_methods */
+    0,                         /* tp_members */
+    0,                         /* tp_getset */
+    0,                         /* tp_base */
+    0,                         /* tp_dict */
+    0,                         /* tp_descr_get */
+    0,                         /* tp_descr_set */
+    0,                         /* tp_dictoffset */
+    0,                         /* tp_init */
+    0,                         /* tp_alloc */
+    PyType_GenericNew,         /* tp_new */
+};
+
+//------------------------------------------------------------------------------
+//
+// Helper create functions which allow setting of properties at creation time 
+//
+//------------------------------------------------------------------------------
 
 static PyObject* optix_createContext( PyObject* self, PyObject* args, PyObject* kwds )
 {
@@ -834,6 +1152,12 @@ static PyObject* Context_createAcceleration( PyObject* self, PyObject* args, PyO
 }
 */
 
+
+//------------------------------------------------------------------------------
+//
+// Additional ariable setters 
+//
+//------------------------------------------------------------------------------
 
 static PyObject* Variable_setUint( PyObject* self, PyObject* args, PyObject* kwds )
 {
