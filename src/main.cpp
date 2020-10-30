@@ -1,59 +1,66 @@
+
 #include <pybind11/pybind11.h>
+
 #include <optix.h>
-
-int add(int i, int j) {
-    return i + j;
-}
-
-PYBIND11_MAKE_OPAQUE( OptixDeviceContext );
+//#include "pyoptix.h"
 
 namespace py = pybind11;
+    
+namespace pyoptix
+{
+// Opaque type struct wrappers
 
-PYBIND11_MODULE(optix, m) {
+struct DeviceContext
+{
+    OptixDeviceContext deviceContext;
+};
+
+struct Module
+{
+    OptixModule module;
+};
+
+struct ProgramGroup
+{
+    OptixProgramGroup programGroup;
+};
+
+struct Pipeline
+{
+    OptixPipeline pipeline;
+};
+
+struct Denoiser
+{
+    OptixDenoiser denoiser;
+};
+
+} // end namespace pyoptix
+
+PYBIND11_MODULE( optix, m ) 
+{
     m.doc() = R"pbdoc(
-        Pybind11 example plugin
+        OptiX API 
         -----------------------
 
-        .. currentmodule:: optix 
+        .. currentmodule:: optix
 
         .. autosummary::
            :toctree: _generate
 
-           add
-           subtract
     )pbdoc";
 
-    py::class_<OptixDeviceContext>(m, "DeviceContext")
-    /*
-        .def( 
-            py::init( 
-                [](CUcontext fromContext, const OptixDeviceContextOptions* options) 
-                { 
-                    OptixDeviceContext ctx; 
-                    optixDeviceContextCreate( fromContext, options, &ctx ); 
-                    return ctx;
-                }
-            )
-        )
-        */
-        .def("destroy", [](OptixDeviceContext ctx) { optixDeviceContextDestroy(  ctx ); } )
-        ;
+    // Opaque types
+    
+    py::class_<OptixDeviceContext>( m, "DeviceContext" );
 
-    m.def("add", &add, R"pbdoc(
-        Add two numbers
+    py::class_<OptixModule>( m, "Module" );
 
-        Some other explanation about the add function.
-    )pbdoc");
+    py::class_<OptixProgramGroup>( m, "ProgramGroup" );
 
-    m.def("subtract", [](int i, int j) { return i - j; }, R"pbdoc(
-        Subtract two numbers
+    py::class_<OptixPipeline>( m, "Pipeline" );
 
-        Some other explanation about the subtract function.
-    )pbdoc");
+    py::class_<OptixDenoiser>( m, "Denoiser" );
 
-#ifdef VERSION_INFO
-    m.attr("__version__") = VERSION_INFO;
-#else
-    m.attr("__version__") = "dev";
-#endif
 }
+

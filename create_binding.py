@@ -10,7 +10,7 @@ main_template = '''
 #include <pybind11/pybind11.h>
 
 #include <optix.h>
-#include "pyoptix.h"
+//#include "pyoptix.h"
 
 namespace py = pybind11;
     
@@ -126,7 +126,7 @@ struct {pyoptix_name}
 '''
 
 opaque_type_binding_template = '''
-    py::class_<optix_name>( m, "{pyoptix_name}" );
+    py::class_<{optix_name}>( m, "{pyoptix_name}" );
 '''
 opaque_types_structs  = []
 opaque_types_bindings = []
@@ -139,6 +139,7 @@ for optix_name in opaque_types:
         pyoptix_name = pyoptix_name, 
         var_name     = var_name 
         )
+    )
     opaque_types_bindings.append( opaque_type_binding_template.format( 
         optix_name   = optix_name, 
         pyoptix_name = pyoptix_name
@@ -153,4 +154,6 @@ main = main_template.format(
         opaque_types_structs = "".join( opaque_types_structs ),
         opaque_types_bindings = "".join( opaque_types_bindings ) 
         )
-print( main )
+
+with open( "bindings.cpp", "w" ) as outfile:
+    print( main, file=outfile )
