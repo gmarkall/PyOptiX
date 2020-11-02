@@ -39,7 +39,21 @@ PYBIND11_MODULE( optix, m )
 '''
 
 
+#-------------------------------------------------------------------------------
+#
+# Parse the optix_7_types header for data types 
+#
+#-------------------------------------------------------------------------------
 
+#
+# Outputs of type parsing phase
+#
+opaque_types = [] # List of API objects (eg OptixDeviceContext)
+struct_types = {} # Structs used as inputs to API funcs: typename -> [members]
+enum_types   = {} # Enumeration pairs: enum_name -> [enum_val0, enum_val1, ...]
+
+
+# regex for parsing
 re_opaque_type  = re.compile( "^typedef\s+struct\s+[A-Za-z_]+\*\s+([A-Za-z]+)" )
 
 re_typedef_end  = re.compile( "^\s*}\s+([A-Za-z]+)\s*;" )
@@ -59,12 +73,9 @@ if len( sys.argv ) != 2:
 optix_include = sys.argv[1]
 print( "Looking for optix headers in '{}'".format( optix_include ) )
 
-opaque_types = []
-struct_types = {} 
-enum_types   = {}
-
-with open( os.path.join( optix_include, 'optix_7_types.h' ), 'r' ) as types_file:
-    print( "Found optix types header ..." )
+types_path = os.path.join( optix_include, 'optix_7_types.h' ) 
+with open( types_path, 'r' ) as types_file:
+    print( "Found optix types header {} ...".format( types_path ) )
 
     cur_struct   = None
     cur_enum     = None 
@@ -118,6 +129,52 @@ with open( os.path.join( optix_include, 'optix_7_types.h' ), 'r' ) as types_file
             continue
 
 
+#-------------------------------------------------------------------------------
+#
+# Parse optix_7_host header for API functions 
+#
+#-------------------------------------------------------------------------------
+
+
+def optix_type_to_pyoptix( typename ):
+    return typename.replace( "Optix", "", 1 )
+
+def optix_func_to_pyoptix( funcname ):
+    no_ns = funcname.replace( "optix", "", 1 )
+    pyoptix_type = ""
+    for ot in opaque_types:
+        pot = optix_type_to_pyoptix( ot )
+        if no_ns.startswith( pot ):
+            pyoptix_type = pot
+            break
+    return pyoptix_type, funcname.replace( pyoptix_type, "", 1 )
+
+
+
+re_function = re.compile( "^\s*([^\n]+?)\s+optix([A-Za-z]+)(\(.*?\))", 
+        re.MULTILINE | re.DOTALL 
+        )
+
+with open( os.path.join( optix_include, 'optix_7_host.h' ), 'r' ) as host_file:
+    print( "Found optix host header ..." )
+    matches = re_function.findall( host_file.read() ) 
+    for m in matches:
+        ret_type = m[0]
+        typename, funcname = optix_func_to_pyoptix( m[1] )
+        print( "'{}' '{}'".format( typename, funcname ) )
+        #params = split_params( m[2] ) 
+        print( "========================================" )
+        print( m )
+        print( "========================================" )
+
+
+
+#-------------------------------------------------------------------------------
+#
+#
+#
+#-------------------------------------------------------------------------------
+
 opaque_type_struct_template = '''
 struct {pyoptix_name}
 {{
@@ -132,7 +189,7 @@ opaque_types_structs  = []
 opaque_types_bindings = []
 
 for optix_name in opaque_types:
-    pyoptix_name = optix_name.replace( "Optix", "", 1 )
+    pyoptix_name = optix_type_to_pyoptix( optix_name )
     var_name     = pyoptix_name[0].lower() + pyoptix_name[1:] 
     opaque_types_structs.append( opaque_type_struct_template.format( 
         optix_name   = optix_name, 
@@ -145,7 +202,6 @@ for optix_name in opaque_types:
         pyoptix_name = pyoptix_name
         )
     )
-
 
 
 
