@@ -1,16 +1,17 @@
 
 #include <pybind11/pybind11.h>
-#include <optix.h>
 
+#include <optix.h>
+#include <optix_stubs.h>
+#include <optix_function_table_definition.h>
+
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 
 
 namespace py = pybind11;
     
-PYBIND11_MAKE_OPAQUE( OptixModule );
-PYBIND11_MAKE_OPAQUE( OptixModule_t );
-
 #define PYOPTIX_CHECK( call )                                                  \
     do                                                                         \
     {                                                                          \
@@ -21,34 +22,73 @@ PYBIND11_MAKE_OPAQUE( OptixModule_t );
 
 namespace pyoptix
 {
+//
+// Helpers
+//
+
+
+//
+// Wrappers for CUDA types
+// 
+
+namespace cuda
+{
+
+
+struct Stream
+{
+    Stream() {}
+    Stream( uint64_t s ) : stream( reinterpret_cast<CUstream>( s ) ) {} // Note NOT explicit
+    Stream( void* s ) : stream( reinterpret_cast<CUstream>( s ) ) {} // Note NOT explicit
+    CUstream stream=0;
+};
+
+struct Context
+{
+    Context() {}
+    Context( uint64_t c ) : context( reinterpret_cast<CUcontext>( c ) ) {} // Note NOT explicit
+    Context( void* c ) : context( reinterpret_cast<CUcontext>( c ) ) {} // Note NOT explicit
+    CUcontext context=0;
+};
+
+} // end namespace cuda
+
+
+//
 // Opaque type struct wrappers
+//
 
 struct DeviceContext
 {
-    OptixDeviceContext deviceContext;
+    OptixDeviceContext deviceContext = 0;
 };
 
 struct Module
 {
-    OptixModule module;
+    OptixModule module = 0;
 };
 
 struct ProgramGroup
 {
-    OptixProgramGroup programGroup;
+    OptixProgramGroup programGroup = 0;
 };
 
 struct Pipeline
 {
-    OptixPipeline pipeline;
+    OptixPipeline pipeline = 0;
 };
 
 struct Denoiser
 {
-    OptixDenoiser denoiser;
+    OptixDenoiser denoiser = 0;
 };
 
 
+void init()
+{
+    PYOPTIX_CHECK( optixInit() );
+}
+ 
 // Error checking api func wrappers
 
 const char* getErrorName( 
@@ -65,34 +105,35 @@ const char* getErrorString(
     return optixGetErrorString( result );
 }
  
-void deviceContextCreate( 
-       CUcontext fromContext,
-       const OptixDeviceContextOptions* options,
-       OptixDeviceContext* context
+pyoptix::DeviceContext deviceContextCreate( 
+       pyoptix::cuda::Context fromContext,
+       const OptixDeviceContextOptions& options
     )
 {
+    pyoptix::DeviceContext ctx{};
     PYOPTIX_CHECK( 
         optixDeviceContextCreate(
-            fromContext,
-            options,
-            context
+            fromContext.context,
+            &options,
+            &ctx.deviceContext
         )
     );
+    return ctx;
 }
  
 void deviceContextDestroy( 
-       OptixDeviceContext context
+       pyoptix::DeviceContext context
     )
 {
     PYOPTIX_CHECK( 
         optixDeviceContextDestroy(
-            context
+            context.deviceContext
         )
     );
 }
  
 void deviceContextGetProperty( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        OptixDeviceProperty property,
        void* value,
        size_t sizeInBytes
@@ -100,7 +141,7 @@ void deviceContextGetProperty(
 {
     PYOPTIX_CHECK( 
         optixDeviceContextGetProperty(
-            context,
+            context.deviceContext,
             property,
             value,
             sizeInBytes
@@ -109,7 +150,7 @@ void deviceContextGetProperty(
 }
  
 void deviceContextSetLogCallback( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        OptixLogCallback   callbackFunction,
        void*              callbackData,
        unsigned int       callbackLevel
@@ -117,7 +158,7 @@ void deviceContextSetLogCallback(
 {
     PYOPTIX_CHECK( 
         optixDeviceContextSetLogCallback(
-            context,
+            context.deviceContext,
             callbackFunction,
             callbackData,
             callbackLevel
@@ -126,40 +167,40 @@ void deviceContextSetLogCallback(
 }
  
 void deviceContextSetCacheEnabled( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        int                enabled
     )
 {
     PYOPTIX_CHECK( 
         optixDeviceContextSetCacheEnabled(
-            context,
+            context.deviceContext,
             enabled
         )
     );
 }
  
 void deviceContextSetCacheLocation( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        const char* location
     )
 {
     PYOPTIX_CHECK( 
         optixDeviceContextSetCacheLocation(
-            context,
+            context.deviceContext,
             location
         )
     );
 }
  
 void deviceContextSetCacheDatabaseSizes( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        size_t lowWaterMark,
        size_t highWaterMark
     )
 {
     PYOPTIX_CHECK( 
         optixDeviceContextSetCacheDatabaseSizes(
-            context,
+            context.deviceContext,
             lowWaterMark,
             highWaterMark
         )
@@ -167,27 +208,27 @@ void deviceContextSetCacheDatabaseSizes(
 }
  
 void deviceContextGetCacheEnabled( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        int* enabled
     )
 {
     PYOPTIX_CHECK( 
         optixDeviceContextGetCacheEnabled(
-            context,
+            context.deviceContext,
             enabled
         )
     );
 }
  
 void deviceContextGetCacheLocation( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        char* location,
        size_t locationSize
     )
 {
     PYOPTIX_CHECK( 
         optixDeviceContextGetCacheLocation(
-            context,
+            context.deviceContext,
             location,
             locationSize
         )
@@ -195,58 +236,63 @@ void deviceContextGetCacheLocation(
 }
  
 void deviceContextGetCacheDatabaseSizes( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        size_t* lowWaterMark,
        size_t* highWaterMark
     )
 {
     PYOPTIX_CHECK( 
         optixDeviceContextGetCacheDatabaseSizes(
-            context,
+            context.deviceContext,
             lowWaterMark,
             highWaterMark
         )
     );
 }
  
+// TODO: get tid of numProgramGroups
 void pipelineCreate( 
-       OptixDeviceContext                 context,
+       pyoptix::DeviceContext                 context,
        const OptixPipelineCompileOptions* pipelineCompileOptions,
        const OptixPipelineLinkOptions*    pipelineLinkOptions,
-       const OptixProgramGroup*           programGroups,
+       const std::vector<pyoptix::ProgramGroup>&  programGroups,
        unsigned int                       numProgramGroups,
        char*                              logString,
        size_t*                            logStringSize,
-       OptixPipeline*                     pipeline
+       pyoptix::Pipeline*                 pipeline
     )
 {
+    std::vector<OptixProgramGroup> pgs;
+    pgs.reserve( programGroups.size() );
+    for( const auto pg : programGroups )
+        pgs.push_back( pg.programGroup );
     PYOPTIX_CHECK( 
         optixPipelineCreate(
-            context,
+            context.deviceContext,
             pipelineCompileOptions,
             pipelineLinkOptions,
-            programGroups,
+            pgs.data(),
             numProgramGroups,
             logString,
             logStringSize,
-            pipeline
+            &pipeline->pipeline
         )
     );
 }
  
 void pipelineDestroy( 
-       OptixPipeline pipeline
+       pyoptix::Pipeline pipeline
     )
 {
     PYOPTIX_CHECK( 
         optixPipelineDestroy(
-            pipeline
+            pipeline.pipeline
         )
     );
 }
  
 void pipelineSetStackSize( 
-       OptixPipeline pipeline,
+       pyoptix::Pipeline pipeline,
        unsigned int  directCallableStackSizeFromTraversal,
        unsigned int  directCallableStackSizeFromState,
        unsigned int  continuationStackSize,
@@ -255,7 +301,7 @@ void pipelineSetStackSize(
 {
     PYOPTIX_CHECK( 
         optixPipelineSetStackSize(
-            pipeline,
+            pipeline.pipeline,
             directCallableStackSizeFromTraversal,
             directCallableStackSizeFromState,
             continuationStackSize,
@@ -265,7 +311,7 @@ void pipelineSetStackSize(
 }
  
 void moduleCreateFromPTX( 
-       OptixDeviceContext                 context,
+       pyoptix::DeviceContext                 context,
        const OptixModuleCompileOptions*   moduleCompileOptions,
        const OptixPipelineCompileOptions* pipelineCompileOptions,
        const char*                        PTX,
@@ -277,7 +323,7 @@ void moduleCreateFromPTX(
 {
     PYOPTIX_CHECK( 
         optixModuleCreateFromPTX(
-            context,
+            context.deviceContext,
             moduleCompileOptions,
             pipelineCompileOptions,
             PTX,
@@ -290,18 +336,18 @@ void moduleCreateFromPTX(
 }
  
 void moduleDestroy( 
-       OptixModule module
+       pyoptix::Module module
     )
 {
     PYOPTIX_CHECK( 
         optixModuleDestroy(
-            module
+            module.module
         )
     );
 }
  
 void builtinISModuleGet( 
-       OptixDeviceContext                 context,
+       pyoptix::DeviceContext                 context,
        const OptixModuleCompileOptions*   moduleCompileOptions,
        const OptixPipelineCompileOptions* pipelineCompileOptions,
        const OptixBuiltinISOptions*       builtinISOptions,
@@ -310,7 +356,7 @@ void builtinISModuleGet(
 {
     PYOPTIX_CHECK( 
         optixBuiltinISModuleGet(
-            context,
+            context.deviceContext,
             moduleCompileOptions,
             pipelineCompileOptions,
             builtinISOptions,
@@ -320,20 +366,20 @@ void builtinISModuleGet(
 }
  
 void programGroupGetStackSize( 
-       OptixProgramGroup programGroup,
+       pyoptix::ProgramGroup programGroup,
        OptixStackSizes* stackSizes
     )
 {
     PYOPTIX_CHECK( 
         optixProgramGroupGetStackSize(
-            programGroup,
+            programGroup.programGroup,
             stackSizes
         )
     );
 }
  
 void programGroupCreate( 
-       OptixDeviceContext              context,
+       pyoptix::DeviceContext          context,
        const OptixProgramGroupDesc*    programDescriptions,
        unsigned int                    numProgramGroups,
        const OptixProgramGroupOptions* options,
@@ -344,7 +390,7 @@ void programGroupCreate(
 {
     PYOPTIX_CHECK( 
         optixProgramGroupCreate(
-            context,
+            context.deviceContext,
             programDescriptions,
             numProgramGroups,
             options,
@@ -356,19 +402,19 @@ void programGroupCreate(
 }
  
 void programGroupDestroy( 
-       OptixProgramGroup programGroup
+       pyoptix::ProgramGroup programGroup
     )
 {
     PYOPTIX_CHECK( 
         optixProgramGroupDestroy(
-            programGroup
+            programGroup.programGroup
         )
     );
 }
  
 void launch( 
-       OptixPipeline                  pipeline,
-       CUstream                       stream,
+       pyoptix::Pipeline              pipeline,
+       pyoptix::cuda::Stream          stream,
        CUdeviceptr                    pipelineParams,
        size_t                         pipelineParamsSize,
        const OptixShaderBindingTable* sbt,
@@ -379,8 +425,8 @@ void launch(
 {
     PYOPTIX_CHECK( 
         optixLaunch(
-            pipeline,
-            stream,
+            pipeline.pipeline,
+            stream.stream,
             pipelineParams,
             pipelineParamsSize,
             sbt,
@@ -392,20 +438,20 @@ void launch(
 }
  
 void sbtRecordPackHeader( 
-       OptixProgramGroup programGroup,
+       pyoptix::ProgramGroup programGroup,
        void* sbtRecordHeaderHostPointer
     )
 {
     PYOPTIX_CHECK( 
         optixSbtRecordPackHeader(
-            programGroup,
+            programGroup.programGroup,
             sbtRecordHeaderHostPointer
         )
     );
 }
  
 void accelComputeMemoryUsage( 
-       OptixDeviceContext            context,
+       pyoptix::DeviceContext            context,
        const OptixAccelBuildOptions* accelOptions,
        const OptixBuildInput*        buildInputs,
        unsigned int                  numBuildInputs,
@@ -414,7 +460,7 @@ void accelComputeMemoryUsage(
 {
     PYOPTIX_CHECK( 
         optixAccelComputeMemoryUsage(
-            context,
+            context.deviceContext,
             accelOptions,
             buildInputs,
             numBuildInputs,
@@ -424,8 +470,8 @@ void accelComputeMemoryUsage(
 }
  
 void accelBuild( 
-       OptixDeviceContext            context,
-       CUstream                      stream,
+       pyoptix::DeviceContext        context,
+       pyoptix::cuda::Stream         stream,
        const OptixAccelBuildOptions* accelOptions,
        const OptixBuildInput*        buildInputs,
        unsigned int                  numBuildInputs,
@@ -440,8 +486,8 @@ void accelBuild(
 {
     PYOPTIX_CHECK( 
         optixAccelBuild(
-            context,
-            stream,
+            context.deviceContext,
+            stream.stream,
             accelOptions,
             buildInputs,
             numBuildInputs,
@@ -457,14 +503,14 @@ void accelBuild(
 }
  
 void accelGetRelocationInfo( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        OptixTraversableHandle handle,
        OptixAccelRelocationInfo* info
     )
 {
     PYOPTIX_CHECK( 
         optixAccelGetRelocationInfo(
-            context,
+            context.deviceContext,
             handle,
             info
         )
@@ -472,14 +518,14 @@ void accelGetRelocationInfo(
 }
  
 void accelCheckRelocationCompatibility( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        const OptixAccelRelocationInfo* info,
        int* compatible
     )
 {
     PYOPTIX_CHECK( 
         optixAccelCheckRelocationCompatibility(
-            context,
+            context.deviceContext,
             info,
             compatible
         )
@@ -487,8 +533,8 @@ void accelCheckRelocationCompatibility(
 }
  
 void accelRelocate( 
-       OptixDeviceContext              context,
-       CUstream                        stream,
+       pyoptix::DeviceContext          context,
+       pyoptix::cuda::Stream           stream,
        const OptixAccelRelocationInfo* info,
        CUdeviceptr                     instanceTraversableHandles,
        size_t                          numInstanceTraversableHandles,
@@ -499,8 +545,8 @@ void accelRelocate(
 {
     PYOPTIX_CHECK( 
         optixAccelRelocate(
-            context,
-            stream,
+            context.deviceContext,
+            stream.stream,
             info,
             instanceTraversableHandles,
             numInstanceTraversableHandles,
@@ -512,8 +558,8 @@ void accelRelocate(
 }
  
 void accelCompact( 
-       OptixDeviceContext      context,
-       CUstream                stream,
+       pyoptix::DeviceContext  context,
+       pyoptix::cuda::Stream   stream,
        OptixTraversableHandle  inputHandle,
        CUdeviceptr             outputBuffer,
        size_t                  outputBufferSizeInBytes,
@@ -522,8 +568,8 @@ void accelCompact(
 {
     PYOPTIX_CHECK( 
         optixAccelCompact(
-            context,
-            stream,
+            context.deviceContext,
+            stream.stream,
             inputHandle,
             outputBuffer,
             outputBufferSizeInBytes,
@@ -533,7 +579,7 @@ void accelCompact(
 }
  
 void convertPointerToTraversableHandle( 
-       OptixDeviceContext      onDevice,
+       pyoptix::DeviceContext  onDevice,
        CUdeviceptr             pointer,
        OptixTraversableType    traversableType,
        OptixTraversableHandle* traversableHandle
@@ -541,7 +587,7 @@ void convertPointerToTraversableHandle(
 {
     PYOPTIX_CHECK( 
         optixConvertPointerToTraversableHandle(
-            onDevice,
+            onDevice.deviceContext,
             pointer,
             traversableType,
             traversableHandle
@@ -550,22 +596,22 @@ void convertPointerToTraversableHandle(
 }
  
 void denoiserCreate( 
-       OptixDeviceContext context,
+       pyoptix::DeviceContext context,
        const OptixDenoiserOptions* options,
-       OptixDenoiser* denoiser
+       pyoptix::Denoiser* denoiser
     )
 {
     PYOPTIX_CHECK( 
         optixDenoiserCreate(
-            context,
+            context.deviceContext,
             options,
-            denoiser
+            &denoiser->denoiser
         )
     );
 }
  
 void denoiserSetModel( 
-       OptixDenoiser denoiser,
+       pyoptix::Denoiser denoiser,
        OptixDenoiserModelKind kind,
        void* data,
        size_t sizeInBytes
@@ -573,7 +619,7 @@ void denoiserSetModel(
 {
     PYOPTIX_CHECK( 
         optixDenoiserSetModel(
-            denoiser,
+            denoiser.denoiser,
             kind,
             data,
             sizeInBytes
@@ -582,18 +628,18 @@ void denoiserSetModel(
 }
  
 void denoiserDestroy( 
-       OptixDenoiser denoiser
+       pyoptix::Denoiser denoiser
     )
 {
     PYOPTIX_CHECK( 
         optixDenoiserDestroy(
-            denoiser
+            denoiser.denoiser
         )
     );
 }
  
 void denoiserComputeMemoryResources( 
-       const OptixDenoiser denoiser,
+       const pyoptix::Denoiser denoiser,
        unsigned int        outputWidth,
        unsigned int        outputHeight,
        OptixDenoiserSizes* returnSizes
@@ -601,7 +647,7 @@ void denoiserComputeMemoryResources(
 {
     PYOPTIX_CHECK( 
         optixDenoiserComputeMemoryResources(
-            denoiser,
+            denoiser.denoiser,
             outputWidth,
             outputHeight,
             returnSizes
@@ -610,8 +656,8 @@ void denoiserComputeMemoryResources(
 }
  
 void denoiserSetup( 
-       OptixDenoiser denoiser,
-       CUstream      stream,
+       pyoptix::Denoiser denoiser,
+       pyoptix::cuda::Stream stream,
        unsigned int  inputWidth,
        unsigned int  inputHeight,
        CUdeviceptr   denoiserState,
@@ -622,8 +668,8 @@ void denoiserSetup(
 {
     PYOPTIX_CHECK( 
         optixDenoiserSetup(
-            denoiser,
-            stream,
+            denoiser.denoiser,
+            stream.stream,
             inputWidth,
             inputHeight,
             denoiserState,
@@ -635,8 +681,8 @@ void denoiserSetup(
 }
  
 void denoiserInvoke( 
-       OptixDenoiser              denoiser,
-       CUstream                   stream,
+       pyoptix::Denoiser          denoiser,
+       pyoptix::cuda::Stream      stream,
        const OptixDenoiserParams* params,
        CUdeviceptr                denoiserState,
        size_t                     denoiserStateSizeInBytes,
@@ -651,8 +697,8 @@ void denoiserInvoke(
 {
     PYOPTIX_CHECK( 
         optixDenoiserInvoke(
-            denoiser,
-            stream,
+            denoiser.denoiser,
+            stream.stream,
             params,
             denoiserState,
             denoiserStateSizeInBytes,
@@ -668,8 +714,8 @@ void denoiserInvoke(
 }
  
 void denoiserComputeIntensity( 
-       OptixDenoiser       denoiser,
-       CUstream            stream,
+       pyoptix::Denoiser   denoiser,
+       pyoptix::cuda::Stream stream,
        const OptixImage2D* inputImage,
        CUdeviceptr         outputIntensity,
        CUdeviceptr         scratch,
@@ -678,8 +724,8 @@ void denoiserComputeIntensity(
 {
     PYOPTIX_CHECK( 
         optixDenoiserComputeIntensity(
-            denoiser,
-            stream,
+            denoiser.denoiser,
+            stream.stream,
             inputImage,
             outputIntensity,
             scratch,
@@ -689,8 +735,8 @@ void denoiserComputeIntensity(
 }
  
 void denoiserComputeAverageColor( 
-       OptixDenoiser       denoiser,
-       CUstream            stream,
+       pyoptix::Denoiser   denoiser,
+       pyoptix::cuda::Stream stream,
        const OptixImage2D* inputImage,
        CUdeviceptr         outputAverageColor,
        CUdeviceptr         scratch,
@@ -699,8 +745,8 @@ void denoiserComputeAverageColor(
 {
     PYOPTIX_CHECK( 
         optixDenoiserComputeAverageColor(
-            denoiser,
-            stream,
+            denoiser.denoiser,
+            stream.stream,
             inputImage,
             outputAverageColor,
             scratch,
@@ -730,14 +776,29 @@ PYBIND11_MODULE( optix, m )
     // Module methods 
     //
     //---------------------------------------------------------------------------
-    /*
-    m.def( "getErrorName", &pyoptix::GetErrorName );
-    m.def( "getErrorString", &pyoptix::GetErrorString );
-    m.def( "launch", &pyoptix::Launch );
-    m.def( "sbtRecordPackHeader", &pyoptix::SbtRecordPackHeader );
-    m.def( "convertPointerToTraversableHandle", &pyoptix::ConvertPointerToTraversableHandle );
-    */
+    m.def( "init", &pyoptix::init);
+    m.def( "deviceContextCreate", &pyoptix::deviceContextCreate);
+    m.def( "getErrorName", &pyoptix::getErrorName );
+    m.def( "getErrorString", &pyoptix::getErrorString );
+    m.def( "launch", &pyoptix::launch );
+    m.def( "sbtRecordPackHeader", &pyoptix::sbtRecordPackHeader );
+    m.def( "convertPointerToTraversableHandle", &pyoptix::convertPointerToTraversableHandle );
 
+    //---------------------------------------------------------------------------
+    //
+    // Structs for interfacing with CUDA
+    //
+    //---------------------------------------------------------------------------
+    auto m_cuda = m.def_submodule( "cuda", nullptr /*TODO: docstring*/ );
+    py::class_<pyoptix::cuda::Stream>(m_cuda, "Stream")
+        .def( py::init<>() )
+        .def( py::init<uint64_t>() )
+        ;
+    
+    py::class_<pyoptix::cuda::Context>(m_cuda, "Context")
+        .def( py::init<>() )
+        .def( py::init<uint64_t>() )
+        ;
     
     //---------------------------------------------------------------------------
     //
@@ -1004,7 +1065,7 @@ PYBIND11_MODULE( optix, m )
 
     py::class_<OptixDeviceContextOptions>(m, "DeviceContextOptions")
         .def( py::init([]() { return std::unique_ptr<OptixDeviceContextOptions>(new OptixDeviceContextOptions{} ); } ) )
-        .def_readwrite( "logCallbackFunction", &OptixDeviceContextOptions::logCallbackFunction )
+        //.def_readwrite( "logCallbackFunction", &OptixDeviceContextOptions::logCallbackFunction )
         .def_readwrite( "logCallbackData", &OptixDeviceContextOptions::logCallbackData )
         .def_readwrite( "logCallbackLevel", &OptixDeviceContextOptions::logCallbackLevel )
         .def_readwrite( "validationMode", &OptixDeviceContextOptions::validationMode )
@@ -1198,30 +1259,44 @@ PYBIND11_MODULE( optix, m )
 
     py::class_<OptixProgramGroupSingleModule>(m, "ProgramGroupSingleModule")
         .def( py::init([]() { return std::unique_ptr<OptixProgramGroupSingleModule>(new OptixProgramGroupSingleModule{} ); } ) )
-        //.def_readwrite( "module", &OptixProgramGroupSingleModule::module, py::return_value_policy::reference)
-        //.def_readwrite( "entryFunctionName", &OptixProgramGroupSingleModule::entryFunctionName )
+        .def_property("module", 
+                [](const OptixProgramGroupSingleModule& self) { return pyoptix::Module{ self.module}; }, 
+                [](OptixProgramGroupSingleModule& self, const pyoptix::Module &val) { self.module = val.module; }
+                )
+        .def_readwrite( "entryFunctionName", &OptixProgramGroupSingleModule::entryFunctionName )
         ;
 
     py::class_<OptixProgramGroupHitgroup>(m, "ProgramGroupHitgroup")
         .def( py::init([]() { return std::unique_ptr<OptixProgramGroupHitgroup>(new OptixProgramGroupHitgroup{} ); } ) )
-        /*
-        .def_readwrite( "moduleCH", &OptixProgramGroupHitgroup::moduleCH )
+        .def_property("moduleCH", 
+                [](const OptixProgramGroupHitgroup& self) { return pyoptix::Module{ self.moduleCH}; }, 
+                [](OptixProgramGroupHitgroup& self, const pyoptix::Module &val) { self.moduleCH = val.module; }
+                )
         .def_readwrite( "entryFunctionNameCH", &OptixProgramGroupHitgroup::entryFunctionNameCH )
-        .def_readwrite( "moduleAH", &OptixProgramGroupHitgroup::moduleAH )
+        .def_property("moduleAH", 
+                [](const OptixProgramGroupHitgroup& self) { return pyoptix::Module{ self.moduleAH}; }, 
+                [](OptixProgramGroupHitgroup& self, const pyoptix::Module &val) { self.moduleAH = val.module; }
+                )
         .def_readwrite( "entryFunctionNameAH", &OptixProgramGroupHitgroup::entryFunctionNameAH )
-        .def_readwrite( "moduleIS", &OptixProgramGroupHitgroup::moduleIS )
+        .def_property("moduleIS", 
+                [](const OptixProgramGroupHitgroup& self) { return pyoptix::Module{ self.moduleIS}; }, 
+                [](OptixProgramGroupHitgroup& self, const pyoptix::Module &val) { self.moduleIS = val.module; }
+                )
         .def_readwrite( "entryFunctionNameIS", &OptixProgramGroupHitgroup::entryFunctionNameIS )
-        */
         ;
 
     py::class_<OptixProgramGroupCallables>(m, "ProgramGroupCallables")
         .def( py::init([]() { return std::unique_ptr<OptixProgramGroupCallables>(new OptixProgramGroupCallables{} ); } ) )
-        /*
-        .def_readwrite( "moduleDC", &OptixProgramGroupCallables::moduleDC )
+        .def_property("moduleDC", 
+                [](const OptixProgramGroupCallables& self) { return pyoptix::Module{ self.moduleDC}; }, 
+                [](OptixProgramGroupCallables& self, const pyoptix::Module &val) { self.moduleDC = val.module; }
+                )
         .def_readwrite( "entryFunctionNameDC", &OptixProgramGroupCallables::entryFunctionNameDC )
-        .def_readwrite( "moduleCC", &OptixProgramGroupCallables::moduleCC )
+        .def_property("moduleCC", 
+                [](const OptixProgramGroupCallables& self) { return pyoptix::Module{ self.moduleCC}; }, 
+                [](OptixProgramGroupCallables& self, const pyoptix::Module &val) { self.moduleCC = val.module; }
+                )
         .def_readwrite( "entryFunctionNameCC", &OptixProgramGroupCallables::entryFunctionNameCC )
-        */
         ;
 
     py::class_<OptixProgramGroupDesc>(m, "ProgramGroupDesc")
@@ -1296,8 +1371,7 @@ PYBIND11_MODULE( optix, m )
     //
     //---------------------------------------------------------------------------
     
-    /*
-    py::class_<OptixDeviceContext>( m, "DeviceContext" )
+    py::class_<pyoptix::DeviceContext>( m, "DeviceContext" )
         .def( "destroy", &pyoptix::deviceContextDestroy )
         .def( "getProperty", &pyoptix::deviceContextGetProperty )
         .def( "setLogCallback", &pyoptix::deviceContextSetLogCallback )
@@ -1307,17 +1381,21 @@ PYBIND11_MODULE( optix, m )
         .def( "getCacheEnabled", &pyoptix::deviceContextGetCacheEnabled )
         .def( "getCacheLocation", &pyoptix::deviceContextGetCacheLocation )
         .def( "getCacheDatabaseSizes", &pyoptix::deviceContextGetCacheDatabaseSizes )
+
         .def( "pipelineCreate", &pyoptix::pipelineCreate )
+
+        /*
         .def( "moduleCreateFromPTX", &pyoptix::moduleCreateFromPTX )
-        .def( "moduleBuiltinISGet", &pyoptix::deviceContextModuleBuiltinISGet )
+        .def( "moduleBuiltinISGet", &pyoptix::builtinISModuleGet )
         .def( "programGroupCreate", &pyoptix::programGroupCreate )
-        .def( "accelComputeMemoryUsage", &pyoptix::deviceContextAccelComputeMemoryUsage )
-        .def( "accelBuild", &pyoptix::deviceContextAccelBuild )
-        .def( "accelGetRelocationInfo", &pyoptix::deviceContextAccelGetRelocationInfo )
-        .def( "accelCheckRelocationCompatibility", &pyoptix::deviceContextAccelCheckRelocationCompatibility )
-        .def( "accelRelocate", &pyoptix::deviceContextAccelRelocate )
-        .def( "accelCompact", &pyoptix::deviceContextAccelCompact )
+        .def( "accelComputeMemoryUsage", &pyoptix::accelComputeMemoryUsage )
+        .def( "accelBuild", &pyoptix::accelBuild )
+        .def( "accelGetRelocationInfo", &pyoptix::accelGetRelocationInfo )
+        .def( "accelCheckRelocationCompatibility", &pyoptix::accelCheckRelocationCompatibility )
+        .def( "accelRelocate", &pyoptix::accelRelocate )
+        .def( "accelCompact", &pyoptix::accelCompact )
         .def( "denoiserCreate", &pyoptix::denoiserCreate )
+        */
         ;
 
     py::class_<OptixModule>( m, "Module" )
@@ -1344,6 +1422,5 @@ PYBIND11_MODULE( optix, m )
         .def( "computeAverageColor", &pyoptix::denoiserComputeAverageColor )
         ;
 
-    */
 }
 
