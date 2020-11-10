@@ -25,6 +25,19 @@ namespace pyoptix
 //
 // Helpers
 //
+void context_log_cb( unsigned int level, const char* tag, const char* message, void* cbdata  )
+{
+    py::object* cb = reinterpret_cast<py::object*>( cbdata );
+    (*cb)( level, tag, message );
+}
+
+
+struct DeviceContextOptionsProxy
+{
+    py::object logCallbackFunction;
+    int logCallbackLevel;
+    OptixDeviceContextValidationMode validationMode;
+};
 
 
 //
@@ -61,6 +74,7 @@ struct Context
 struct DeviceContext
 {
     OptixDeviceContext deviceContext = 0;
+    py::object         logCallbackFunction;
 };
 
 struct Module
@@ -107,10 +121,18 @@ const char* getErrorString(
  
 pyoptix::DeviceContext deviceContextCreate( 
        pyoptix::cuda::Context fromContext,
-       const OptixDeviceContextOptions& options
+       const pyoptix::DeviceContextOptionsProxy& options_proxy
     )
 {
     pyoptix::DeviceContext ctx{};
+    ctx.logCallbackFunction = options_proxy.logCallbackFunction;
+
+    OptixDeviceContextOptions options{};
+    options.logCallbackLevel    = options_proxy.logCallbackLevel;
+    options.logCallbackFunction = ctx.logCallbackFunction ? pyoptix::context_log_cb  : nullptr; 
+    options.logCallbackData     = ctx.logCallbackFunction ? &ctx.logCallbackFunction : nullptr;
+    options.validationMode      = options_proxy.validationMode;
+
     PYOPTIX_CHECK( 
         optixDeviceContextCreate(
             fromContext.context,
@@ -1063,12 +1085,13 @@ PYBIND11_MODULE( optix, m )
     //
     //---------------------------------------------------------------------------
 
-    py::class_<OptixDeviceContextOptions>(m, "DeviceContextOptions")
-        .def( py::init([]() { return std::unique_ptr<OptixDeviceContextOptions>(new OptixDeviceContextOptions{} ); } ) )
+    py::class_<pyoptix::DeviceContextOptionsProxy>(m, "DeviceContextOptions")
+        .def( py::init<>() )
         //.def_readwrite( "logCallbackFunction", &OptixDeviceContextOptions::logCallbackFunction )
-        .def_readwrite( "logCallbackData", &OptixDeviceContextOptions::logCallbackData )
-        .def_readwrite( "logCallbackLevel", &OptixDeviceContextOptions::logCallbackLevel )
-        .def_readwrite( "validationMode", &OptixDeviceContextOptions::validationMode )
+        .def_readwrite( "logCallbackFunction", &pyoptix::DeviceContextOptionsProxy::logCallbackFunction )
+        //.def_readwrite( "logCallbackData", &OptixDeviceContextOptions::logCallbackData )
+        .def_readwrite( "logCallbackLevel", &pyoptix::DeviceContextOptionsProxy::logCallbackLevel )
+        .def_readwrite( "validationMode", &pyoptix::DeviceContextOptionsProxy::validationMode )
         ;
 
     py::class_<OptixBuildInputTriangleArray>(m, "BuildInputTriangleArray")
