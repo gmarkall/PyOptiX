@@ -5,6 +5,7 @@
 #include <optix_stubs.h>
 #include <optix_function_table_definition.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -25,6 +26,9 @@ namespace pyoptix
 //
 // Helpers
 //
+
+constexpr size_t LOG_BUFFER_MAX_SIZE = 2048u;
+
 void context_log_cb( unsigned int level, const char* tag, const char* message, void* cbdata  )
 {
     py::object* cb = reinterpret_cast<py::object*>( cbdata );
@@ -137,9 +141,10 @@ pyoptix::DeviceContext deviceContextCreate(
         optixDeviceContextCreate(
             fromContext.context,
             &options,
-            &ctx.deviceContext
+            &(ctx.deviceContext)
         )
     );
+    printf(" CONTEXT CREATED: %p\n", ctx.deviceContext );
     return ctx;
 }
  
@@ -332,29 +337,64 @@ void pipelineSetStackSize(
     );
 }
  
-void moduleCreateFromPTX( 
-       pyoptix::DeviceContext                 context,
-       const OptixModuleCompileOptions*   moduleCompileOptions,
-       const OptixPipelineCompileOptions* pipelineCompileOptions,
-       const char*                        PTX,
-       size_t                             PTXsize,
-       char*                              logString,
-       size_t*                            logStringSize,
-       OptixModule*                       module
-    )
+pyoptix::Module moduleCreateFromPTX( 
+       pyoptix::DeviceContext             context,
+       OptixModuleCompileOptions*   moduleCompileOptions,
+       OptixPipelineCompileOptions* pipelineCompileOptions,
+       const std::string&                 PTX,
+       std::string&                       logString
+       )
 {
+    size_t log_buf_size = LOG_BUFFER_MAX_SIZE;
+    char   log_buf[ LOG_BUFFER_MAX_SIZE ];
+    log_buf[0] = '\0';
+    
+
+
+    pipelineCompileOptions->pipelineLaunchParamsVariableName = "params";
+
+
+
+
+
+
+    pyoptix::Module module;
+    //printf( "%s", PTX.c_str() );
+    printf( "\n<<%p>>\n", context.deviceContext);
+    printf( "<<%p>>\n", moduleCompileOptions );
+    printf( "<<%p>>\n", pipelineCompileOptions );
+    printf( "%d %d %d %p %d\n",
+            moduleCompileOptions->maxRegisterCount,
+            moduleCompileOptions->optLevel,
+            moduleCompileOptions->debugLevel,
+            moduleCompileOptions->boundValues,
+            moduleCompileOptions->numBoundValues );
+
+    printf( "%d %d %d %d %d '%s' %p %d\n",
+            pipelineCompileOptions->usesMotionBlur,
+            pipelineCompileOptions->traversableGraphFlags,
+            pipelineCompileOptions->numPayloadValues,
+            pipelineCompileOptions->numAttributeValues,
+            pipelineCompileOptions->exceptionFlags,
+            pipelineCompileOptions->pipelineLaunchParamsVariableName,
+            pipelineCompileOptions->pipelineLaunchParamsVariableName,
+            pipelineCompileOptions->usesPrimitiveTypeFlags );
+
+
     PYOPTIX_CHECK( 
         optixModuleCreateFromPTX(
             context.deviceContext,
             moduleCompileOptions,
             pipelineCompileOptions,
-            PTX,
-            PTXsize,
-            logString,
-            logStringSize,
-            module
+            PTX.c_str(),
+            static_cast<size_t>( PTX.size()+1 ),
+            0, //log_buf,
+            0, //&log_buf_size,
+            &module.module
         )
     );
+    logString = log_buf;
+    return module;
 }
  
 void moduleDestroy( 
@@ -1404,11 +1444,9 @@ PYBIND11_MODULE( optix, m )
         .def( "getCacheEnabled", &pyoptix::deviceContextGetCacheEnabled )
         .def( "getCacheLocation", &pyoptix::deviceContextGetCacheLocation )
         .def( "getCacheDatabaseSizes", &pyoptix::deviceContextGetCacheDatabaseSizes )
-
         .def( "pipelineCreate", &pyoptix::pipelineCreate )
-
-        /*
         .def( "moduleCreateFromPTX", &pyoptix::moduleCreateFromPTX )
+        /*
         .def( "moduleBuiltinISGet", &pyoptix::builtinISModuleGet )
         .def( "programGroupCreate", &pyoptix::programGroupCreate )
         .def( "accelComputeMemoryUsage", &pyoptix::accelComputeMemoryUsage )
@@ -1421,21 +1459,21 @@ PYBIND11_MODULE( optix, m )
         */
         ;
 
-    py::class_<OptixModule>( m, "Module" )
+    py::class_<pyoptix::Module>( m, "Module" )
         .def( "destroy", &pyoptix::moduleDestroy )
         ;
 
-    py::class_<OptixProgramGroup>( m, "ProgramGroup" )
+    py::class_<pyoptix::ProgramGroup>( m, "ProgramGroup" )
         .def( "getStackSize", &pyoptix::programGroupGetStackSize )
         .def( "destroy", &pyoptix::programGroupDestroy )
         ;
 
-    py::class_<OptixPipeline>( m, "Pipeline" )
+    py::class_<pyoptix::Pipeline>( m, "Pipeline" )
         .def( "destroy", &pyoptix::pipelineDestroy )
         .def( "setStackSize", &pyoptix::pipelineSetStackSize )
         ;
 
-    py::class_<OptixDenoiser>( m, "Denoiser" )
+    py::class_<pyoptix::Denoiser>( m, "Denoiser" )
         .def( "setModel", &pyoptix::denoiserSetModel )
         .def( "destroy", &pyoptix::denoiserDestroy )
         .def( "computeMemoryResources", &pyoptix::denoiserComputeMemoryResources )
