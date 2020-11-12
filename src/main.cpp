@@ -31,8 +31,8 @@ constexpr size_t LOG_BUFFER_MAX_SIZE = 2048u;
 
 void context_log_cb( unsigned int level, const char* tag, const char* message, void* cbdata  )
 {
-    py::object* cb = reinterpret_cast<py::object*>( cbdata );
-    (*cb)( level, tag, message );
+    py::object cb( py::handle( reinterpret_cast<PyObject*>( cbdata ) ), true );
+    cb( level, tag, message );
 }
 
 
@@ -133,8 +133,10 @@ pyoptix::DeviceContext deviceContextCreate(
 
     OptixDeviceContextOptions options{};
     options.logCallbackLevel    = options_proxy.logCallbackLevel;
-    options.logCallbackFunction = ctx.logCallbackFunction ? pyoptix::context_log_cb  : nullptr; 
-    options.logCallbackData     = ctx.logCallbackFunction ? &ctx.logCallbackFunction : nullptr;
+    options.logCallbackFunction = ctx.logCallbackFunction ? 
+	                          pyoptix::context_log_cb :
+				  nullptr; 
+    options.logCallbackData     = ctx.logCallbackFunction.ptr();
     options.validationMode      = options_proxy.validationMode;
 
     PYOPTIX_CHECK( 
@@ -144,7 +146,6 @@ pyoptix::DeviceContext deviceContextCreate(
             &(ctx.deviceContext)
         )
     );
-    printf(" CONTEXT CREATED: %p\n", ctx.deviceContext );
     return ctx;
 }
  
@@ -351,7 +352,7 @@ pyoptix::Module moduleCreateFromPTX(
     
 
 
-    pipelineCompileOptions->pipelineLaunchParamsVariableName = "params";
+//    pipelineCompileOptions->pipelineLaunchParamsVariableName = "params";
 
 
 
