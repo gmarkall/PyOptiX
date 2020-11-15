@@ -31,17 +31,9 @@ constexpr size_t LOG_BUFFER_MAX_SIZE = 2048u;
 
 void context_log_cb( unsigned int level, const char* tag, const char* message, void* cbdata  )
 {
-    py::object cb( py::handle( reinterpret_cast<PyObject*>( cbdata ) ), true );
+    py::object cb = py::reinterpret_borrow<py::object>( reinterpret_cast<PyObject*>( cbdata ) );
     cb( level, tag, message );
 }
-
-
-struct DeviceContextOptionsProxy
-{
-    py::object logCallbackFunction;
-    int logCallbackLevel;
-    OptixDeviceContextValidationMode validationMode;
-};
 
 
 //
@@ -69,6 +61,51 @@ struct Context
 };
 
 } // end namespace cuda
+
+
+//
+// Proxy objets to modify some functionality in the optix param structs
+//
+
+struct DeviceContextOptions
+{
+    // This proxy object exists to pass along a py::object function for the log
+    // callback so that it is correctly reference counted
+    py::object logCallbackFunction;
+    OptixDeviceContextOptions options;
+};
+
+
+struct PipelineCompileOptions
+{
+    // all char* need to be backed by strings
+    std::string pipelineLaunchParamsVariableName;
+    OptixPipelineCompileOptions options;
+};
+
+
+struct ProgramGroupSingleModule
+{
+    std::string entryFunctionName;
+    OptixProgramGroupSingleModule program_group;
+};
+
+
+struct ProgramGroupHitgroup
+{
+    std::string entryFunctionNameCH;
+    std::string entryFunctionNameAH;
+    std::string entryFunctionNameIS;
+    OptixProgramGroupHitgroup program_group;
+};
+
+
+struct ProgramGroupCallables
+{
+    std::string entryFunctionNameDC;
+    std::string entryFunctionNameCC;
+    OptixProgramGroupCallables program_group;
+};
 
 
 //
@@ -125,24 +162,16 @@ const char* getErrorString(
  
 pyoptix::DeviceContext deviceContextCreate( 
        pyoptix::cuda::Context fromContext,
-       const pyoptix::DeviceContextOptionsProxy& options_proxy
+       const pyoptix::DeviceContextOptions& options
     )
 {
     pyoptix::DeviceContext ctx{};
-    ctx.logCallbackFunction = options_proxy.logCallbackFunction;
-
-    OptixDeviceContextOptions options{};
-    options.logCallbackLevel    = options_proxy.logCallbackLevel;
-    options.logCallbackFunction = ctx.logCallbackFunction ? 
-	                          pyoptix::context_log_cb :
-				  nullptr; 
-    options.logCallbackData     = ctx.logCallbackFunction.ptr();
-    options.validationMode      = options_proxy.validationMode;
+    ctx.logCallbackFunction = options.logCallbackFunction;
 
     PYOPTIX_CHECK( 
         optixDeviceContextCreate(
             fromContext.context,
-            &options,
+            &options.options,
             &(ctx.deviceContext)
         )
     );
@@ -278,34 +307,41 @@ void deviceContextGetCacheDatabaseSizes(
     );
 }
  
+
 // TODO: get tid of numProgramGroups
-void pipelineCreate( 
-       pyoptix::DeviceContext                 context,
+pyoptix::Pipeline pipelineCreate( 
+       pyoptix::DeviceContext             context,
        const OptixPipelineCompileOptions* pipelineCompileOptions,
        const OptixPipelineLinkOptions*    pipelineLinkOptions,
        const std::vector<pyoptix::ProgramGroup>&  programGroups,
-       unsigned int                       numProgramGroups,
-       char*                              logString,
-       size_t*                            logStringSize,
-       pyoptix::Pipeline*                 pipeline
+       std::string&                      logString
     )
 {
     std::vector<OptixProgramGroup> pgs;
     pgs.reserve( programGroups.size() );
     for( const auto pg : programGroups )
         pgs.push_back( pg.programGroup );
+    
+    size_t log_buf_size = LOG_BUFFER_MAX_SIZE;
+    char   log_buf[ LOG_BUFFER_MAX_SIZE ];
+    log_buf[0] = '\0';
+
+    pyoptix::Pipeline pipeline{};
     PYOPTIX_CHECK( 
         optixPipelineCreate(
             context.deviceContext,
             pipelineCompileOptions,
             pipelineLinkOptions,
             pgs.data(),
-            numProgramGroups,
-            logString,
-            logStringSize,
-            &pipeline->pipeline
+            static_cast<uint32_t>( pgs.size() ),
+            log_buf,
+            &log_buf_size,
+            &pipeline.pipeline
         )
     );
+
+    logString = log_buf;
+    return pipeline;
 }
  
 void pipelineDestroy( 
@@ -339,58 +375,30 @@ void pipelineSetStackSize(
 }
  
 pyoptix::Module moduleCreateFromPTX( 
-       pyoptix::DeviceContext             context,
-       OptixModuleCompileOptions*   moduleCompileOptions,
-       OptixPipelineCompileOptions* pipelineCompileOptions,
-       const std::string&                 PTX,
-       std::string&                       logString
+       pyoptix::DeviceContext            context,
+       OptixModuleCompileOptions*        moduleCompileOptions,
+       pyoptix::PipelineCompileOptions*  pipelineCompileOptions,
+       const std::string&                PTX,
+       std::string&                      logString
        )
 {
     size_t log_buf_size = LOG_BUFFER_MAX_SIZE;
     char   log_buf[ LOG_BUFFER_MAX_SIZE ];
     log_buf[0] = '\0';
-    
-
-
-//    pipelineCompileOptions->pipelineLaunchParamsVariableName = "params";
-
-
-
-
-
 
     pyoptix::Module module;
-    //printf( "%s", PTX.c_str() );
-    printf( "\n<<%p>>\n", context.deviceContext);
-    printf( "<<%p>>\n", moduleCompileOptions );
-    printf( "<<%p>>\n", pipelineCompileOptions );
-    printf( "%d %d %d %p %d\n",
-            moduleCompileOptions->maxRegisterCount,
-            moduleCompileOptions->optLevel,
-            moduleCompileOptions->debugLevel,
-            moduleCompileOptions->boundValues,
-            moduleCompileOptions->numBoundValues );
-
-    printf( "%d %d %d %d %d '%s' %p %d\n",
-            pipelineCompileOptions->usesMotionBlur,
-            pipelineCompileOptions->traversableGraphFlags,
-            pipelineCompileOptions->numPayloadValues,
-            pipelineCompileOptions->numAttributeValues,
-            pipelineCompileOptions->exceptionFlags,
-            pipelineCompileOptions->pipelineLaunchParamsVariableName,
-            pipelineCompileOptions->pipelineLaunchParamsVariableName,
-            pipelineCompileOptions->usesPrimitiveTypeFlags );
-
+    pipelineCompileOptions->options.pipelineLaunchParamsVariableName = 
+        pipelineCompileOptions->pipelineLaunchParamsVariableName.c_str();
 
     PYOPTIX_CHECK( 
         optixModuleCreateFromPTX(
             context.deviceContext,
             moduleCompileOptions,
-            pipelineCompileOptions,
+            &pipelineCompileOptions->options,
             PTX.c_str(),
             static_cast<size_t>( PTX.size()+1 ),
-            0, //log_buf,
-            0, //&log_buf_size,
+            log_buf,
+            &log_buf_size,
             &module.module
         )
     );
@@ -409,25 +417,26 @@ void moduleDestroy(
     );
 }
  
-void builtinISModuleGet( 
-       pyoptix::DeviceContext                 context,
-       const OptixModuleCompileOptions*   moduleCompileOptions,
-       const OptixPipelineCompileOptions* pipelineCompileOptions,
-       const OptixBuiltinISOptions*       builtinISOptions,
-       OptixModule*                       builtinModule
+pyoptix::Module builtinISModuleGet( 
+       pyoptix::DeviceContext            context,
+       OptixModuleCompileOptions*        moduleCompileOptions,
+       pyoptix::PipelineCompileOptions*  pipelineCompileOptions,
+       const OptixBuiltinISOptions*      builtinISOptions
     )
 {
+    pyoptix::Module module;
     PYOPTIX_CHECK( 
         optixBuiltinISModuleGet(
             context.deviceContext,
             moduleCompileOptions,
-            pipelineCompileOptions,
+            &pipelineCompileOptions->options,
             builtinISOptions,
-            builtinModule
+            &module.module
         )
     );
+    return module;
 }
- 
+
 void programGroupGetStackSize( 
        pyoptix::ProgramGroup programGroup,
        OptixStackSizes* stackSizes
@@ -441,27 +450,34 @@ void programGroupGetStackSize(
     );
 }
  
-void programGroupCreate( 
+// TODO: make this return a std::vector<ProgramGroup> and make it opaque
+pyoptix::ProgramGroup programGroupCreate( 
        pyoptix::DeviceContext          context,
        const OptixProgramGroupDesc*    programDescriptions,
        unsigned int                    numProgramGroups,
        const OptixProgramGroupOptions* options,
-       char*                           logString,
-       size_t*                         logStringSize,
-       OptixProgramGroup*              programGroups
+       std::string&                    logString
     )
 {
+    size_t log_buf_size = LOG_BUFFER_MAX_SIZE;
+    char   log_buf[ LOG_BUFFER_MAX_SIZE ];
+    log_buf[0] = '\0';
+
+    pyoptix::ProgramGroup program_group;
+
     PYOPTIX_CHECK( 
         optixProgramGroupCreate(
             context.deviceContext,
             programDescriptions,
-            numProgramGroups,
+            numProgramGroups,     // TODO
             options,
-            logString,
-            logStringSize,
-            programGroups
+            log_buf,
+            &log_buf_size,
+            &program_group.programGroup
         )
     );
+    logString = log_buf;
+    return program_group;
 }
  
 void programGroupDestroy( 
@@ -1126,13 +1142,34 @@ PYBIND11_MODULE( optix, m )
     //
     //---------------------------------------------------------------------------
 
-    py::class_<pyoptix::DeviceContextOptionsProxy>(m, "DeviceContextOptions")
-        .def( py::init<>() )
-        //.def_readwrite( "logCallbackFunction", &OptixDeviceContextOptions::logCallbackFunction )
-        .def_readwrite( "logCallbackFunction", &pyoptix::DeviceContextOptionsProxy::logCallbackFunction )
-        //.def_readwrite( "logCallbackData", &OptixDeviceContextOptions::logCallbackData )
-        .def_readwrite( "logCallbackLevel", &pyoptix::DeviceContextOptionsProxy::logCallbackLevel )
-        .def_readwrite( "validationMode", &pyoptix::DeviceContextOptionsProxy::validationMode )
+    py::class_<pyoptix::DeviceContextOptions>(m, "DeviceContextOptions")
+        .def( py::init( []() { 
+            return std::unique_ptr<pyoptix::DeviceContextOptions>( 
+                new pyoptix::DeviceContextOptions{} 
+            ); 
+        } ) )
+        .def_property( "logCallbackFunction", 
+                [](const pyoptix::DeviceContextOptions& self) 
+                { return self.options.logCallbackFunction; }, 
+                [](pyoptix::DeviceContextOptions& self, py::object val)
+                { 
+                    self.logCallbackFunction= val; 
+                    self.options.logCallbackFunction = pyoptix::context_log_cb; 
+                    self.options.logCallbackData = val.ptr();
+                }
+            )
+        .def_property("logCallbackLevel", 
+                [](const pyoptix::DeviceContextOptions& self) 
+                { return self.options.logCallbackLevel;}, 
+                [](pyoptix::DeviceContextOptions& self, int val) 
+                { self.options.logCallbackLevel = val; }
+            )
+        .def_property("validationMode", 
+                [](const pyoptix::DeviceContextOptions& self) 
+                { return self.options.validationMode; }, 
+                [](pyoptix::DeviceContextOptions& self, OptixDeviceContextValidationMode val) 
+                { self.options.validationMode = val; }
+            )
         ;
 
     py::class_<OptixBuildInputTriangleArray>(m, "BuildInputTriangleArray")
@@ -1197,8 +1234,8 @@ PYBIND11_MODULE( optix, m )
 
     py::class_<OptixBuildInputInstanceArray>(m, "BuildInputInstanceArray")
         .def( py::init([]() { return std::unique_ptr<OptixBuildInputInstanceArray>(new OptixBuildInputInstanceArray{} ); } ) )
-        .def_readwrite( "instances", &OptixBuildInputInstanceArray::instances )
-        .def_readwrite( "numInstances", &OptixBuildInputInstanceArray::numInstances )
+  //      .def_readwrite( "instances", &OptixBuildInputInstanceArray::instances )
+   //     .def_readwrite( "numInstances", &OptixBuildInputInstanceArray::numInstances )
         ;
 
     py::class_<OptixBuildInput>(m, "BuildInput")
@@ -1321,13 +1358,17 @@ PYBIND11_MODULE( optix, m )
         .def_readwrite( "numBoundValues", &OptixModuleCompileOptions::numBoundValues )
         ;
 
-    py::class_<OptixProgramGroupSingleModule>(m, "ProgramGroupSingleModule")
-        .def( py::init([]() { return std::unique_ptr<OptixProgramGroupSingleModule>(new OptixProgramGroupSingleModule{} ); } ) )
+    py::class_<pyoptix::ProgramGroupSingleModule>(m, "ProgramGroupSingleModule")
+        .def( py::init([]() 
+            { return std::unique_ptr<pyoptix::ProgramGroupSingleModule>(new pyoptix::ProgramGroupSingleModule{} ); }
+        ) )
         .def_property("module", 
-                [](const OptixProgramGroupSingleModule& self) { return pyoptix::Module{ self.module}; }, 
-                [](OptixProgramGroupSingleModule& self, const pyoptix::Module &val) { self.module = val.module; }
-                )
-        .def_readwrite( "entryFunctionName", &OptixProgramGroupSingleModule::entryFunctionName )
+            [](const pyoptix::ProgramGroupSingleModule& self) 
+            { return pyoptix::Module{ self.program_group.module }; }, 
+            [](pyoptix::ProgramGroupSingleModule& self, const pyoptix::Module &val) 
+            { self.program_group.module = val.module; }
+        )
+        .def_readwrite( "entryFunctionName", &pyoptix::ProgramGroupSingleModule::entryFunctionName )
         ;
 
     py::class_<OptixProgramGroupHitgroup>(m, "ProgramGroupHitgroup")
@@ -1367,7 +1408,11 @@ PYBIND11_MODULE( optix, m )
         .def( py::init([]() { return std::unique_ptr<OptixProgramGroupDesc>(new OptixProgramGroupDesc{} ); } ) )
         .def_readwrite( "kind", &OptixProgramGroupDesc::kind )
         .def_readwrite( "flags", &OptixProgramGroupDesc::flags )
-        .def_readwrite( "raygen", &OptixProgramGroupDesc::raygen )
+        .def_property( "raygen", 
+                //[](OptixProgramGroupDesc& self) { return pyoptix::ProgramGroupSingleModule{ "", self.raygen }; }, 
+                [](OptixProgramGroupDesc& self) { return  self.raygen; }, 
+                nullptr
+                )
         .def_readwrite( "miss", &OptixProgramGroupDesc::miss )
         .def_readwrite( "exception", &OptixProgramGroupDesc::exception )
         .def_readwrite( "callables", &OptixProgramGroupDesc::callables )
@@ -1379,15 +1424,50 @@ PYBIND11_MODULE( optix, m )
         .def_readwrite( "placeholder", &OptixProgramGroupOptions::placeholder )
         ;
 
-    py::class_<OptixPipelineCompileOptions>(m, "PipelineCompileOptions")
-        .def( py::init([]() { return std::unique_ptr<OptixPipelineCompileOptions>(new OptixPipelineCompileOptions{} ); } ) )
-        .def_readwrite( "usesMotionBlur", &OptixPipelineCompileOptions::usesMotionBlur )
-        .def_readwrite( "traversableGraphFlags", &OptixPipelineCompileOptions::traversableGraphFlags )
-        .def_readwrite( "numPayloadValues", &OptixPipelineCompileOptions::numPayloadValues )
-        .def_readwrite( "numAttributeValues", &OptixPipelineCompileOptions::numAttributeValues )
-        .def_readwrite( "exceptionFlags", &OptixPipelineCompileOptions::exceptionFlags )
-        .def_readwrite( "pipelineLaunchParamsVariableName", &OptixPipelineCompileOptions::pipelineLaunchParamsVariableName )
-        .def_readwrite( "usesPrimitiveTypeFlags", &OptixPipelineCompileOptions::usesPrimitiveTypeFlags )
+    py::class_<pyoptix::PipelineCompileOptions>(m, "PipelineCompileOptions")
+        .def( py::init( []() 
+            { return std::unique_ptr<pyoptix::PipelineCompileOptions>(new pyoptix::PipelineCompileOptions{} ); } 
+        ) )
+        .def_property( "usesMotionBlur",
+            [](const pyoptix::PipelineCompileOptions& self) 
+            { return self.options.usesMotionBlur; },
+            [](pyoptix::PipelineCompileOptions& self, bool val) 
+            { self.options.usesMotionBlur = val; }
+        )
+        .def_property( "traversableGraphFlags",
+            [](const pyoptix::PipelineCompileOptions& self) 
+            { return self.options.traversableGraphFlags; },
+            [](pyoptix::PipelineCompileOptions& self, OptixTraversableGraphFlags val) 
+            { self.options.traversableGraphFlags = val; }
+        )
+        .def_property( "numPayloadValues",
+            [](const pyoptix::PipelineCompileOptions& self) 
+            { return self.options.numPayloadValues; },
+            [](pyoptix::PipelineCompileOptions& self, int val) 
+            { self.options.numPayloadValues = val; }
+        )
+        .def_property( "numAttributeValues",
+            [](const pyoptix::PipelineCompileOptions& self) 
+            { return self.options.numAttributeValues; },
+            [](pyoptix::PipelineCompileOptions& self, int val) 
+            { self.options.numAttributeValues = val; }
+        )
+        .def_property( "exceptionFlags",
+            [](const pyoptix::PipelineCompileOptions& self) 
+            { return self.options.exceptionFlags; },
+            [](pyoptix::PipelineCompileOptions& self, OptixExceptionFlags val) 
+            { self.options.exceptionFlags = val; }
+        )
+        .def_readwrite( 
+            "pipelineLaunchParamsVariableName", 
+            &pyoptix::PipelineCompileOptions::pipelineLaunchParamsVariableName 
+        )
+        .def_property( "usesPrimitiveTypeFlags",
+            [](const pyoptix::PipelineCompileOptions& self) 
+            { return self.options.usesPrimitiveTypeFlags; },
+            [](pyoptix::PipelineCompileOptions& self, bool val) 
+            { self.options.usesPrimitiveTypeFlags = val; }
+        )
         ;
 
     py::class_<OptixPipelineLinkOptions>(m, "PipelineLinkOptions")
@@ -1447,9 +1527,9 @@ PYBIND11_MODULE( optix, m )
         .def( "getCacheDatabaseSizes", &pyoptix::deviceContextGetCacheDatabaseSizes )
         .def( "pipelineCreate", &pyoptix::pipelineCreate )
         .def( "moduleCreateFromPTX", &pyoptix::moduleCreateFromPTX )
-        /*
         .def( "moduleBuiltinISGet", &pyoptix::builtinISModuleGet )
         .def( "programGroupCreate", &pyoptix::programGroupCreate )
+        /*
         .def( "accelComputeMemoryUsage", &pyoptix::accelComputeMemoryUsage )
         .def( "accelBuild", &pyoptix::accelBuild )
         .def( "accelGetRelocationInfo", &pyoptix::accelGetRelocationInfo )

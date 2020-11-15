@@ -177,13 +177,83 @@ def create_module( ctx, pipeline_options ):
     module_options.debugLevel       = optix.COMPILE_DEBUG_LEVEL_LINEINFO
 
     log = ""
-    return ctx.moduleCreateFromPTX(
+    module = ctx.moduleCreateFromPTX(
             module_options,
             pipeline_options,
             draw_color_ptx,
             log
             )
-    print( "\t{}".format( log ) )
+    print( "\tModule create log: <<<{}>>>".format( log ) )
+    return module
+
+
+def create_program_groups( ctx ):
+    print( "Creating program groups ... " )
+    # TODO: optix.ProgramGroup.Options() ?
+    program_group_options = optix.ProgramGroupOptions();
+
+    # TODO: optix.ProgramGroup.Kind.RAYGEN ?
+    raygen_prog_group_desc  = optix.ProgramGroupDesc()
+    raygen_prog_group_desc.kind                     = optix.PROGRAM_GROUP_KIND_RAYGEN; 
+    raygen_prog_group_desc.raygen.module            = module;
+    raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__draw_solid_color";
+
+    log = ""
+    raygen_prog_group = ctx.programGroupCreate(
+            raygen_prog_group_desc, # TODO: Make this a list: [ raygen_prog_group_desc ]
+            1,   #num program groups
+            program_group_options,
+            log
+            )
+
+    # Leave miss group's module and entryfunc name null
+    miss_prog_group_desc  = optix.ProgramGroupDesc()
+    miss_prog_group_desc.kind = optix.PROGRAM_GROUP_KIND_MISS;
+    miss_prog_group = ctx.programGroupCreate(
+            miss_prog_group_desc,
+            1,   # num program groups
+            program_group_options,
+            log,
+            )
+    return ( raygen_prog_group, miss_prog_group )
+
+
+def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
+    max_trace_depth  = 0;
+    program_groups = [ raygen_prog_group ]
+
+    pipeline_link_options = optix.PipelineLinkOptions() 
+    pipeline_link_options.maxTraceDepth = max_trace_depth;
+    pipeline_link_options.debugLevel    = optix.COMPILE_DEBUG_LEVEL_FULL;
+
+    log = ""
+    pipeline = ctx.pipelineCreate(
+            pipeline_compile_options,
+            pipeline_link_options,
+            program_groups,
+            log
+            )
+
+    '''
+    stack_sizes = optix.StackSizes()
+    for prog_group in program_groups:
+        OPTIX_CHECK( optixUtilAccumulateStackSizes( prog_group, &stack_sizes ) );
+
+    uint32_t direct_callable_stack_size_from_traversal;
+    uint32_t direct_callable_stack_size_from_state;
+    uint32_t continuation_stack_size;
+    OPTIX_CHECK( optixUtilComputeStackSizes( &stack_sizes, max_trace_depth,
+                                             0,  // maxCCDepth
+                                             0,  // maxDCDEpth
+                                             &direct_callable_stack_size_from_traversal,
+                                             &direct_callable_stack_size_from_state, &continuation_stack_size ) );
+    OPTIX_CHECK( optixPipelineSetStackSize( pipeline, direct_callable_stack_size_from_traversal,
+                                            direct_callable_stack_size_from_state, continuation_stack_size,
+                                            2  // maxTraversableDepth
+                                            ) );
+    '''
+    return pipeline
+
 
 
 init_optix()
@@ -198,9 +268,7 @@ pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE;
 pipeline_options.pipelineLaunchParamsVariableName = "params";
 
 module = create_module( ctx, pipeline_options )
-
-
-print( "Creating program groups ... " )
-
+raygen_prog_group, miss_prog_group = create_program_groups( ctx )
+pipeline = create_pipeline( ctx, raygen_prog_group, pipeline_options )
 
 
