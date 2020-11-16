@@ -463,9 +463,6 @@ py::list programGroupCreate(
                     !pydesc.entryFunctionName0.empty() ? 
                     pydesc.entryFunctionName0.c_str() : 
                     nullptr;
-		printf( "<<<<<<%s>>>>>>\n\n", 
-                    pydesc.program_group_desc.raygen.entryFunctionName );
-                break;
             case OPTIX_PROGRAM_GROUP_KIND_HITGROUP:
                 pydesc.program_group_desc.hitgroup.entryFunctionNameCH = 
                     !pydesc.entryFunctionName0.empty() ? 
@@ -495,9 +492,6 @@ py::list programGroupCreate(
         program_groups_descs.push_back( pydesc.program_group_desc );
     }
     std::vector<OptixProgramGroup> program_groups( programDescriptions.size() );
-
-		printf( "<<<<<<%s>>>>>>\n\n", 
-                    program_groups_descs[0].raygen.entryFunctionName );
 
     PYOPTIX_CHECK( 
         optixProgramGroupCreate(
