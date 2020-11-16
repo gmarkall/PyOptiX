@@ -195,13 +195,12 @@ def create_program_groups( ctx ):
     # TODO: optix.ProgramGroup.Kind.RAYGEN ?
     raygen_prog_group_desc  = optix.ProgramGroupDesc()
     raygen_prog_group_desc.kind                     = optix.PROGRAM_GROUP_KIND_RAYGEN; 
-    raygen_prog_group_desc.raygen.module            = module;
-    raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__draw_solid_color";
+    raygen_prog_group_desc.raygenModule             = module;
+    raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__draw_solid_color";
 
     log = ""
     raygen_prog_group = ctx.programGroupCreate(
-            raygen_prog_group_desc, # TODO: Make this a list: [ raygen_prog_group_desc ]
-            1,   #num program groups
+            [ raygen_prog_group_desc ], 
             program_group_options,
             log
             )
@@ -210,17 +209,19 @@ def create_program_groups( ctx ):
     miss_prog_group_desc  = optix.ProgramGroupDesc()
     miss_prog_group_desc.kind = optix.PROGRAM_GROUP_KIND_MISS;
     miss_prog_group = ctx.programGroupCreate(
-            miss_prog_group_desc,
-            1,   # num program groups
+            [ miss_prog_group_desc ],
             program_group_options,
-            log,
+            log
             )
-    return ( raygen_prog_group, miss_prog_group )
+
+    return ( raygen_prog_group[0], miss_prog_group[0] )
 
 
 def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
     max_trace_depth  = 0;
     program_groups = [ raygen_prog_group ]
+    print( raygen_prog_group )
+    print( program_groups )
 
     pipeline_link_options = optix.PipelineLinkOptions() 
     pipeline_link_options.maxTraceDepth = max_trace_depth;
