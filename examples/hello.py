@@ -136,7 +136,8 @@ draw_color_ptx = '''
 '''
 
 import optix
-import cupy
+import cupy  as cp
+import numpy as np
 
 class Logger:
     def __call__( self, level, tag, mssg ):
@@ -148,7 +149,7 @@ def log_callback( level, tag, mssg ):
 
 def init_optix():
     print( "Initializing cuda ..." )
-    cupy.cuda.runtime.free( 0 )
+    cp.cuda.runtime.free( 0 )
 
     print( "Initializing optix ..." )
     optix.init()
@@ -218,10 +219,9 @@ def create_program_groups( ctx ):
 
 
 def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
+    print( "Creating pipeline ... " )
     max_trace_depth  = 0;
     program_groups = [ raygen_prog_group ]
-    print( raygen_prog_group )
-    print( program_groups )
 
     pipeline_link_options = optix.PipelineLinkOptions() 
     pipeline_link_options.maxTraceDepth = max_trace_depth;
@@ -255,6 +255,56 @@ def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
     '''
     return pipeline
 
+def create_sbt( raygen_prog_group, miss_prog_group ):
+    print( "Creating sbt ... " )
+
+
+    dtype = np.dtype( { 
+        'names'   : ['header', 'r', 'g', 'b' ],
+        'formats' : ['32B', 'f4', 'f4', 'f4'],
+        'itemsize': 48,
+        'align'   : True
+        } )
+
+    rg_sbt = np.array( [ (0, 0.462, 0.725, 0.0 ) ], dtype=dtype )
+    #print( "align: {}".format( dtype.alignment ) )
+    #print( "\tCreated nparray of {} bytes\n".format( raygen_record.nbytes ) )
+    optix.sbtRecordPackHeader( raygen_prog_group, rg_sbt )
+    raygen_record = cp.array( rg_sbt )
+    
+
+    '''
+    CUdeviceptr  raygen_record;
+    const size_t raygen_record_size = sizeof( RayGenSbtRecord );
+    CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &raygen_record ), raygen_record_size ) );
+    RayGenSbtRecord rg_sbt;
+    OPTIX_CHECK( optixSbtRecordPackHeader( raygen_prog_group, &rg_sbt ) );
+    rg_sbt.data = {0.462f, 0.725f, 0.f};
+    CUDA_CHECK( cudaMemcpy(
+                reinterpret_cast<void*>( raygen_record ),
+                &rg_sbt,
+                raygen_record_size,
+                cudaMemcpyHostToDevice
+                ) );
+
+    CUdeviceptr miss_record;
+    size_t      miss_record_size = sizeof( MissSbtRecord );
+    CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &miss_record ), miss_record_size ) );
+    RayGenSbtRecord ms_sbt;
+    OPTIX_CHECK( optixSbtRecordPackHeader( miss_prog_group, &ms_sbt ) );
+    CUDA_CHECK( cudaMemcpy(
+                reinterpret_cast<void*>( miss_record ),
+                &ms_sbt,
+                miss_record_size,
+                cudaMemcpyHostToDevice
+                ) );
+
+    sbt.raygenRecord                = raygen_record;
+    sbt.missRecordBase              = miss_record;
+    sbt.missRecordStrideInBytes     = sizeof( MissSbtRecord );
+    sbt.missRecordCount             = 1;
+    '''
+
 
 
 init_optix()
@@ -268,8 +318,8 @@ pipeline_options.numAttributeValues    = 2;
 pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE;
 pipeline_options.pipelineLaunchParamsVariableName = "params";
 
-module = create_module( ctx, pipeline_options )
+module   = create_module( ctx, pipeline_options )
 raygen_prog_group, miss_prog_group = create_program_groups( ctx )
 pipeline = create_pipeline( ctx, raygen_prog_group, pipeline_options )
-
+sbt      = create_sbt( raygen_prog_group, miss_prog_group ) 
 

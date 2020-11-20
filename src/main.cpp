@@ -551,13 +551,16 @@ void launch(
  
 void sbtRecordPackHeader( 
        pyoptix::ProgramGroup programGroup,
-       void* sbtRecordHeaderHostPointer
+       py::buffer sbtRecord
     )
 {
+    py::buffer_info binfo = sbtRecord.request();
+    // TODO: sanity check buffer
+
     PYOPTIX_CHECK( 
         optixSbtRecordPackHeader(
             programGroup.programGroup,
-            sbtRecordHeaderHostPointer
+            binfo.ptr 
         )
     );
 }
