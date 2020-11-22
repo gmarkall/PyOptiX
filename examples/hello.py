@@ -138,6 +138,7 @@ draw_color_ptx = '''
 import optix
 import cupy  as cp
 import numpy as np
+import ctypes
 
 class Logger:
     def __call__( self, level, tag, mssg ):
@@ -258,7 +259,9 @@ def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
 def create_sbt( raygen_prog_group, miss_prog_group ):
     print( "Creating sbt ... " )
 
-
+    #
+    # raygen record
+    #
     dtype = np.dtype( { 
         'names'   : ['header', 'r', 'g', 'b' ],
         'formats' : ['32B', 'f4', 'f4', 'f4'],
@@ -267,11 +270,35 @@ def create_sbt( raygen_prog_group, miss_prog_group ):
         } )
 
     rg_sbt = np.array( [ (0, 0.462, 0.725, 0.0 ) ], dtype=dtype )
-    #print( "align: {}".format( dtype.alignment ) )
-    #print( "\tCreated nparray of {} bytes\n".format( raygen_record.nbytes ) )
     optix.sbtRecordPackHeader( raygen_prog_group, rg_sbt )
-    raygen_record = cp.array( rg_sbt )
+
+    byte_size = rg_sbt.size*rg_sbt.dtype.itemsize
+    print( "bsize: {}".format( byte_size ) )
+    h_raygen_record = ctypes.c_void_p( rg_sbt.ctypes.data )
+    d_raygen_record = cp.cuda.memory.alloc( byte_size )
+    d_raygen_record.copy_from_async( h_raygen_record, byte_size )
     
+    #
+    # miss record
+    #
+    dtype = np.dtype( { 
+        'names'   : ['header', 'x' ],
+        'formats' : ['32B', 'i4'],
+        'itemsize': 48,
+        'align'   : True
+        } )
+    miss_sbt = np.array( [ (0, 0 ) ], dtype=dtype )
+    byte_size = miss_sbt.size*miss_sbt.dtype.itemsize
+    optix.sbtRecordPackHeader( miss_prog_group, miss_sbt )
+    h_miss_record = ctypes.c_void_p( miss_sbt.ctypes.data )
+    d_miss_record = cp.cuda.memory.alloc( byte_size )
+    d_miss_record.copy_from_async( h_miss_record, byte_size )
+    
+    sbt = optix.ShaderBindingTable();
+    sbt.raygenRecord                = d_raygen_record;
+    sbt.missRecordBase              = d_miss_record;
+    sbt.missRecordStrideInBytes     = byte_size;
+    sbt.missRecordCount             = 1;
 
     '''
     CUdeviceptr  raygen_record;
