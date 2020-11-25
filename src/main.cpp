@@ -526,22 +526,22 @@ void programGroupDestroy(
  
 void launch( 
        pyoptix::Pipeline              pipeline,
-       pyoptix::cuda::Stream          stream,
+       uintptr_t                      stream,
        CUdeviceptr                    pipelineParams,
        size_t                         pipelineParamsSize,
-       const OptixShaderBindingTable* sbt,
-       unsigned int                   width,
-       unsigned int                   height,
-       unsigned int                   depth
+       const OptixShaderBindingTable& sbt,
+       uint32_t                       width,
+       uint32_t                       height,
+       uint32_t                       depth
     )
 {
     PYOPTIX_CHECK( 
         optixLaunch(
             pipeline.pipeline,
-            stream.stream,
+            reinterpret_cast<CUstream>( stream ),
             pipelineParams,
             pipelineParamsSize,
-            sbt,
+            &sbt,
             width,
             height,
             depth

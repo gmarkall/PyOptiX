@@ -135,10 +135,19 @@ draw_color_ptx = '''
 	.file	5 "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.0\\include\\crt\\math_functions.hpp", 1588841123, 96062
 '''
 
+
 import optix
 import cupy  as cp
 import numpy as np
 import ctypes
+from PIL import Image
+
+
+#-------------------------------------------------------------------------------
+#
+# Util 
+#
+#-------------------------------------------------------------------------------
 
 class Logger:
     def __call__( self, level, tag, mssg ):
@@ -146,6 +155,22 @@ class Logger:
 
 def log_callback( level, tag, mssg ):
     print( "[{:>2}][{:>12}]: {}".format( level, tag, mssg ) )
+    
+
+def arrayToDeviceMemory( numpy_array, stream=cp.cuda.Stream() ):
+
+    byte_size = numpy_array.size*numpy_array.dtype.itemsize
+
+    h_ptr = ctypes.c_void_p( numpy_array.ctypes.data )
+    d_mem = cp.cuda.memory.alloc( byte_size )
+    d_mem.copy_from_async( h_ptr, byte_size, stream )
+    return d_mem
+
+#-------------------------------------------------------------------------------
+#
+# Optix setup
+#
+#-------------------------------------------------------------------------------
 
 
 def init_optix():
@@ -256,6 +281,7 @@ def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
     '''
     return pipeline
 
+
 def create_sbt( raygen_prog_group, miss_prog_group ):
     print( "Creating sbt ... " )
 
@@ -268,15 +294,9 @@ def create_sbt( raygen_prog_group, miss_prog_group ):
         'itemsize': 48,
         'align'   : True
         } )
-
-    rg_sbt = np.array( [ (0, 0.462, 0.725, 0.0 ) ], dtype=dtype )
-    optix.sbtRecordPackHeader( raygen_prog_group, rg_sbt )
-
-    byte_size = rg_sbt.size*rg_sbt.dtype.itemsize
-    print( "bsize: {}".format( byte_size ) )
-    h_raygen_record = ctypes.c_void_p( rg_sbt.ctypes.data )
-    d_raygen_record = cp.cuda.memory.alloc( byte_size )
-    d_raygen_record.copy_from_async( h_raygen_record, byte_size )
+    h_raygen_sbt = np.array( [ (0, 0.462, 0.725, 0.0 ) ], dtype=dtype )
+    optix.sbtRecordPackHeader( raygen_prog_group, h_raygen_sbt )
+    d_raygen_sbt = arrayToDeviceMemory( h_raygen_sbt )
     
     #
     # miss record
@@ -287,53 +307,91 @@ def create_sbt( raygen_prog_group, miss_prog_group ):
         'itemsize': 48,
         'align'   : True
         } )
-    miss_sbt = np.array( [ (0, 0 ) ], dtype=dtype )
-    byte_size = miss_sbt.size*miss_sbt.dtype.itemsize
-    optix.sbtRecordPackHeader( miss_prog_group, miss_sbt )
-    h_miss_record = ctypes.c_void_p( miss_sbt.ctypes.data )
-    d_miss_record = cp.cuda.memory.alloc( byte_size )
-    d_miss_record.copy_from_async( h_miss_record, byte_size )
+    h_miss_sbt = np.array( [ (0, 0 ) ], dtype=dtype )
+    optix.sbtRecordPackHeader( miss_prog_group, h_miss_sbt )
+    d_miss_sbt = arrayToDeviceMemory( h_miss_sbt )
     
     sbt = optix.ShaderBindingTable();
-    sbt.raygenRecord                = d_raygen_record;
-    sbt.missRecordBase              = d_miss_record;
-    sbt.missRecordStrideInBytes     = byte_size;
+    sbt.raygenRecord                = d_raygen_sbt.ptr;
+    sbt.missRecordBase              = d_miss_sbt.ptr;
+    sbt.missRecordStrideInBytes     = d_miss_sbt.mem.size;
     sbt.missRecordCount             = 1;
+    return sbt
+
+
+
+#struct Params
+#{
+#    uchar4* image;
+#    unsigned int image_width;
+#};
+
+def launch( pipeline, sbt ):
+
+    pix_width  = 512
+    pix_height = 512
+    pix_bytes  = pix_width*pix_height*4
+    
+    h_pix = np.zeros( (pix_width,pix_height,4), 'B' )
+    d_pix = cp.array( h_pix )
+    print( "raster bsize: {}".format( h_pix.dtype.itemsize * h_pix.size ) )
+
+    params_dtype = np.dtype( { 
+        'names'   : ['image', 'image_width' ],
+        'formats' : ['8B', 'u4'],
+        'align'   : True
+        } )
+
+    h_params = np.array( [ ( d_pix.data.ptr, pix_width ) ], dtype=params_dtype )
+    d_params = arrayToDeviceMemory( h_params )
+
+    stream = cp.cuda.Stream()
+    optix.launch( 
+        pipeline, 
+        stream.ptr, 
+        d_params.ptr, 
+        h_params.dtype.itemsize, 
+        sbt,
+        pix_width,
+        pix_height,
+        1 # depth
+        )
+
+    stream.synchronize()
+
+    h_pix = cp.asnumpy( d_pix )
+    h_pix[0:256, 0:256] = [255, 0, 0, 255]
+    img = Image.fromarray(h_pix, 'RGBA')
+    img.save('my.png')
 
     '''
-    CUdeviceptr  raygen_record;
-    const size_t raygen_record_size = sizeof( RayGenSbtRecord );
-    CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &raygen_record ), raygen_record_size ) );
-    RayGenSbtRecord rg_sbt;
-    OPTIX_CHECK( optixSbtRecordPackHeader( raygen_prog_group, &rg_sbt ) );
-    rg_sbt.data = {0.462f, 0.725f, 0.f};
+    CUstream stream;
+    CUDA_CHECK( cudaStreamCreate( &stream ) );
+
+    Params params;
+    params.image       = output_buffer.map();
+    params.image_width = width;
+
+    CUdeviceptr d_param;
+    CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &d_param ), sizeof( Params ) ) );
     CUDA_CHECK( cudaMemcpy(
-                reinterpret_cast<void*>( raygen_record ),
-                &rg_sbt,
-                raygen_record_size,
+                reinterpret_cast<void*>( d_param ),
+                &params, sizeof( params ),
                 cudaMemcpyHostToDevice
                 ) );
 
-    CUdeviceptr miss_record;
-    size_t      miss_record_size = sizeof( MissSbtRecord );
-    CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &miss_record ), miss_record_size ) );
-    RayGenSbtRecord ms_sbt;
-    OPTIX_CHECK( optixSbtRecordPackHeader( miss_prog_group, &ms_sbt ) );
-    CUDA_CHECK( cudaMemcpy(
-                reinterpret_cast<void*>( miss_record ),
-                &ms_sbt,
-                miss_record_size,
-                cudaMemcpyHostToDevice
-                ) );
+    OPTIX_CHECK( optixLaunch( pipeline, stream, d_param, sizeof( Params ), &sbt, width, height, /*depth=*/1 ) );
+    CUDA_SYNC_CHECK();
 
-    sbt.raygenRecord                = raygen_record;
-    sbt.missRecordBase              = miss_record;
-    sbt.missRecordStrideInBytes     = sizeof( MissSbtRecord );
-    sbt.missRecordCount             = 1;
+    output_buffer.unmap();
     '''
 
 
-
+#-------------------------------------------------------------------------------
+#
+# main
+#
+#-------------------------------------------------------------------------------
 init_optix()
 ctx = create_ctx()
 
@@ -349,4 +407,6 @@ module   = create_module( ctx, pipeline_options )
 raygen_prog_group, miss_prog_group = create_program_groups( ctx )
 pipeline = create_pipeline( ctx, raygen_prog_group, pipeline_options )
 sbt      = create_sbt( raygen_prog_group, miss_prog_group ) 
+pix      = launch( pipeline, sbt ) 
+
 
