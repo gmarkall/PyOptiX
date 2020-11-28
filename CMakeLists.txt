@@ -17,3 +17,6 @@ include_directories(
 
 add_subdirectory(pybind11)
 pybind11_add_module(optix src/main.cpp)
+target_link_libraries( optix PRIVATE
+	"${CUDA_LIBRARIES}"
+	)

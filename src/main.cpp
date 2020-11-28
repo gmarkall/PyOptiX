@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <cuda_runtime.h>
 
 
 namespace py = pybind11;
@@ -535,6 +536,14 @@ void launch(
        uint32_t                       depth
     )
 {
+    char buf[128];
+    cudaError res = cudaMemcpy( 
+        buf, 
+	(void*)sbt.raygenRecord, 
+	48, 
+	cudaMemcpyDeviceToHost 
+	);
+    res = cudaMemcpy( buf, (void*)sbt.missRecordBase, 48, cudaMemcpyDeviceToHost );
     PYOPTIX_CHECK( 
         optixLaunch(
             pipeline.pipeline,
