@@ -5,6 +5,7 @@
 #include <optix.h>
 #include <optix_stubs.h>
 #include <optix_function_table_definition.h>
+#include <optix_stack_size.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -22,6 +23,7 @@ namespace py = pybind11;
         if( res != OPTIX_SUCCESS )                                             \
             throw std::runtime_error( optixGetErrorString( res )  );           \
     } while( 0 )
+
 
 namespace pyoptix
 {
@@ -126,12 +128,17 @@ struct Denoiser
 };
 
 
+//------------------------------------------------------------------------------
+//
+// OptiX API error checked wrappers
+//
+//------------------------------------------------------------------------------
+
 void init()
 {
     PYOPTIX_CHECK( optixInit() );
 }
  
-// Error checking api func wrappers
 
 const char* getErrorName( 
        OptixResult result
@@ -908,11 +915,12 @@ PYBIND11_MODULE( optix, m )
     m.def( "sbtRecordPackHeader", &pyoptix::sbtRecordPackHeader );
     m.def( "convertPointerToTraversableHandle", &pyoptix::convertPointerToTraversableHandle );
 
-    //---------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     //
     // Structs for interfacing with CUDA
+    // TODO: this goes away
     //
-    //---------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     auto m_cuda = m.def_submodule( "cuda", nullptr /*TODO: docstring*/ );
     py::class_<pyoptix::cuda::Stream>(m_cuda, "Stream")
         .def( py::init<>() )
@@ -924,11 +932,23 @@ PYBIND11_MODULE( optix, m )
         .def( py::init<uint64_t>() )
         ;
     
-    //---------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
+    //
+    // Structs for interfacing with CUDA
+    //
+    //--------------------------------------------------------------------------
+    auto m_util = m.def_submodule( "util", nullptr /*TODO: docstring*/ );
+    m_util.def( "accumulateStackSizes", &pyoptix::accumulateStackSizes );
+    m_util.def( "computeStackSizes", &pyoptix::computeStackSizes );
+    m_util.def( "computeStackSizesDCSplit", &pyoptix::computeStackSizesDCSplit );
+    m_util.def( "computeStackSizesCssCCTree", &pyoptix::computeStackSizesCssCCTree );
+    m_util.def( "computeStackSizesSimplePathTracer", &pyoptix::computeStackSizesSimplePathTracer );
+
+    //--------------------------------------------------------------------------
     //
     // Enumerations 
     //
-    //---------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
 
     py::enum_<OptixResult>(m, "Result")
         .value( "SUCCESS", OPTIX_SUCCESS )

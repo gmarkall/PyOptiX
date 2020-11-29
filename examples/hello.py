@@ -48,23 +48,23 @@ def init_optix():
 
 def create_ctx():
     print( "Creating optix device context ..." )
-    cu_ctx      = optix.cuda.Context()
+    cu_ctx      = optix.cuda.Context() # TODO: get rid of optix.cuda.Context
     ctx_options = optix.DeviceContextOptions()
-    #dco.logCallbackFunction = log_callback 
 
     logger = Logger()
-    ctx_options.logCallbackFunction = logger
     ctx_options.logCallbackLevel    = 4
+    ctx_options.logCallbackFunction = logger
+    #ctx_options.logCallbackFunction = log_callback 
 
     return optix.deviceContextCreate( cu_ctx, ctx_options )
 
 
 def create_module( ctx, pipeline_options ):
-
     print( "Creating optix module ..." )
 
     module_options = optix.ModuleCompileOptions()
-    module_options.maxRegisterCount = 0 # need to wrap #defines (eg, optix.COMPILE_DEFAULT_MAX_REGISTER_COUNT )
+    # TODO: need to wrap #defines (eg, optix.COMPILE_DEFAULT_MAX_REGISTER_COUNT)
+    module_options.maxRegisterCount = 0 
     module_options.optLevel         = optix.COMPILE_OPTIMIZATION_DEFAULT
     module_options.debugLevel       = optix.COMPILE_DEBUG_LEVEL_LINEINFO
 
@@ -127,6 +127,7 @@ def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
             )
 
     '''
+    TODO
     stack_sizes = optix.StackSizes()
     for prog_group in program_groups:
         OPTIX_CHECK( optixUtilAccumulateStackSizes( prog_group, &stack_sizes ) );
@@ -187,14 +188,8 @@ def create_sbt( raygen_prog_group, miss_prog_group ):
     return sbt
 
 
-
-#struct Params
-#{
-#    uchar4* image;
-#    unsigned int image_width;
-#};
-
 def launch( pipeline, sbt ):
+    print( "Launching ... " )
 
     pix_width  = 512
     pix_height = 512
@@ -209,7 +204,6 @@ def launch( pipeline, sbt ):
         'formats' : ['u8', 'u4'],
         'align'   : True
         } )
-
     h_params = np.array( [ ( d_pix.data.ptr, pix_width ) ], dtype=params_dtype )
     d_params = arrayToDeviceMemory( h_params )
 
@@ -229,28 +223,6 @@ def launch( pipeline, sbt ):
 
     h_pix = cp.asnumpy( d_pix )
     return h_pix
-
-    '''
-    CUstream stream;
-    CUDA_CHECK( cudaStreamCreate( &stream ) );
-
-    Params params;
-    params.image       = output_buffer.map();
-    params.image_width = width;
-
-    CUdeviceptr d_param;
-    CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &d_param ), sizeof( Params ) ) );
-    CUDA_CHECK( cudaMemcpy(
-                reinterpret_cast<void*>( d_param ),
-                &params, sizeof( params ),
-                cudaMemcpyHostToDevice
-                ) );
-
-    OPTIX_CHECK( optixLaunch( pipeline, stream, d_param, sizeof( Params ), &sbt, width, height, /*depth=*/1 ) );
-    CUDA_SYNC_CHECK();
-
-    output_buffer.unmap();
-    '''
 
 
 #-------------------------------------------------------------------------------
@@ -276,10 +248,12 @@ pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE;
 pipeline_options.pipelineLaunchParamsVariableName = "params";
 
 module   = create_module( ctx, pipeline_options )
-raygen_prog_group, miss_prog_group = create_program_groups( ctx )
+raygen_prog_group, miss_prog_group 
+         = create_program_groups( ctx )
 pipeline = create_pipeline( ctx, raygen_prog_group, pipeline_options )
 sbt      = create_sbt( raygen_prog_group, miss_prog_group ) 
 pix      = launch( pipeline, sbt ) 
+
 img = Image.fromarray(pix, 'RGBA')
 img.save('my.png')
 img.show()
