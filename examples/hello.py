@@ -15,8 +15,13 @@ from PIL import Image
 #-------------------------------------------------------------------------------
 
 class Logger:
+    def __init__( self ):
+        self.num_mssgs = 0
+
     def __call__( self, level, tag, mssg ):
         print( "[{:>2}][{:>12}]: {}".format( level, tag, mssg ) )
+        self.num_mssgs += 1
+
 
 def log_callback( level, tag, mssg ):
     print( "[{:>2}][{:>12}]: {}".format( level, tag, mssg ) )
@@ -51,6 +56,8 @@ def create_ctx():
     cu_ctx      = optix.cuda.Context() # TODO: get rid of optix.cuda.Context
     ctx_options = optix.DeviceContextOptions()
 
+    # Note that log callback data is no longer needed
+    global logger
     logger = Logger()
     ctx_options.logCallbackLevel    = 4
     ctx_options.logCallbackFunction = logger
@@ -126,12 +133,12 @@ def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
             log
             )
 
-    '''
-    TODO
     stack_sizes = optix.StackSizes()
     for prog_group in program_groups:
-        OPTIX_CHECK( optixUtilAccumulateStackSizes( prog_group, &stack_sizes ) );
+        optix.util.accumulateStackSizes( prog_group, stack_sizes )
+    #TODO
 
+    '''
     uint32_t direct_callable_stack_size_from_traversal;
     uint32_t direct_callable_stack_size_from_state;
     uint32_t continuation_stack_size;
@@ -248,11 +255,12 @@ pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE;
 pipeline_options.pipelineLaunchParamsVariableName = "params";
 
 module   = create_module( ctx, pipeline_options )
-raygen_prog_group, miss_prog_group 
-         = create_program_groups( ctx )
+raygen_prog_group, miss_prog_group = create_program_groups( ctx )
 pipeline = create_pipeline( ctx, raygen_prog_group, pipeline_options )
 sbt      = create_sbt( raygen_prog_group, miss_prog_group ) 
 pix      = launch( pipeline, sbt ) 
+
+print( "Total number of log messages: {}".format( logger.num_mssgs ) )
 
 img = Image.fromarray(pix, 'RGBA')
 img.save('my.png')

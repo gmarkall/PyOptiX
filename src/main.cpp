@@ -885,9 +885,132 @@ void denoiserComputeAverageColor(
         )
     );
 }
+    
+
+namespace util
+{
+
+void accumulateStackSizes( 
+        pyoptix::ProgramGroup programGroup,
+        OptixStackSizes*  stackSizes 
+        )
+{
+    PYOPTIX_CHECK( 
+        optixUtilAccumulateStackSizes( programGroup.programGroup, stackSizes )
+    );
+}
+
+void computeStackSizes( 
+        const OptixStackSizes* stackSizes,
+        unsigned int           maxTraceDepth,
+        unsigned int           maxCCDepth,
+        unsigned int           maxDCDepth,
+        unsigned int*          directCallableStackSizeFromTraversal,
+        unsigned int*          directCallableStackSizeFromState,
+        unsigned int*          continuationStackSize 
+        )
+{
+    PYOPTIX_CHECK( 
+        optixUtilComputeStackSizes(
+            stackSizes,
+            maxTraceDepth,
+            maxCCDepth,
+            maxDCDepth,
+            directCallableStackSizeFromTraversal,
+            directCallableStackSizeFromState,
+            continuationStackSize 
+            )
+        );
+}
 
 
+void computeStackSizesDCSplit( 
+        const OptixStackSizes* stackSizes,
+        unsigned int           dssDCFromTraversal,
+        unsigned int           dssDCFromState,
+        unsigned int           maxTraceDepth,
+        unsigned int           maxCCDepth,
+        unsigned int           maxDCDepthFromTraversal,
+        unsigned int           maxDCDepthFromState,
+        unsigned int*          directCallableStackSizeFromTraversal,
+        unsigned int*          directCallableStackSizeFromState,
+        unsigned int*          continuationStackSize 
+        )
+{
+    PYOPTIX_CHECK( 
+        optixUtilComputeStackSizesDCSplit( 
+            stackSizes,
+            dssDCFromTraversal,
+            dssDCFromState,
+            maxTraceDepth,
+            maxCCDepth,
+            maxDCDepthFromTraversal,
+            maxDCDepthFromState,
+            directCallableStackSizeFromTraversal,
+            directCallableStackSizeFromState,
+            continuationStackSize 
+            )
+        );
+}
+
+
+void computeStackSizesCssCCTree( 
+        const OptixStackSizes* stackSizes,
+        unsigned int           cssCCTree,
+        unsigned int           maxTraceDepth,
+        unsigned int           maxDCDepth,
+        unsigned int*          directCallableStackSizeFromTraversal,
+        unsigned int*          directCallableStackSizeFromState,
+        unsigned int*          continuationStackSize 
+        )
+{
+    PYOPTIX_CHECK(
+        optixUtilComputeStackSizesCssCCTree( 
+            stackSizes,
+            cssCCTree,
+            maxTraceDepth,
+            maxDCDepth,
+            directCallableStackSizeFromTraversal,
+            directCallableStackSizeFromState,
+            continuationStackSize 
+            )
+        );
+}
+
+
+void computeStackSizesSimplePathTracer(
+        pyoptix::ProgramGroup        programGroupRG,
+        pyoptix::ProgramGroup        programGroupMS1,
+        const pyoptix::ProgramGroup* programGroupCH1,     // TODO: list
+        unsigned int                 programGroupCH1Count,
+        pyoptix::ProgramGroup        programGroupMS2,
+        const pyoptix::ProgramGroup* programGroupCH2,     // TODO: list
+        unsigned int                 programGroupCH2Count,
+        unsigned int*                directCallableStackSizeFromTraversal,
+        unsigned int*                directCallableStackSizeFromState,
+        unsigned int*                continuationStackSize 
+        )
+{
+    PYOPTIX_CHECK( 
+        optixUtilComputeStackSizesSimplePathTracer( 
+            programGroupRG.programGroup,
+            programGroupMS1.programGroup,
+            &programGroupCH1->programGroup, // TODO:Fix
+            programGroupCH1Count,
+            programGroupMS2.programGroup,
+            &programGroupCH2->programGroup, // TODO:Fix
+            programGroupCH2Count,
+            directCallableStackSizeFromTraversal,
+            directCallableStackSizeFromState,
+            continuationStackSize 
+            )
+        );
+}
+
+
+} // end namespace util
 } // end namespace pyoptix
+
 
 PYBIND11_MODULE( optix, m ) 
 {
@@ -938,11 +1061,11 @@ PYBIND11_MODULE( optix, m )
     //
     //--------------------------------------------------------------------------
     auto m_util = m.def_submodule( "util", nullptr /*TODO: docstring*/ );
-    m_util.def( "accumulateStackSizes", &pyoptix::accumulateStackSizes );
-    m_util.def( "computeStackSizes", &pyoptix::computeStackSizes );
-    m_util.def( "computeStackSizesDCSplit", &pyoptix::computeStackSizesDCSplit );
-    m_util.def( "computeStackSizesCssCCTree", &pyoptix::computeStackSizesCssCCTree );
-    m_util.def( "computeStackSizesSimplePathTracer", &pyoptix::computeStackSizesSimplePathTracer );
+    m_util.def( "accumulateStackSizes", &pyoptix::util::accumulateStackSizes );
+    m_util.def( "computeStackSizes", &pyoptix::util::computeStackSizes );
+    m_util.def( "computeStackSizesDCSplit", &pyoptix::util::computeStackSizesDCSplit );
+    m_util.def( "computeStackSizesCssCCTree", &pyoptix::util::computeStackSizesCssCCTree );
+    m_util.def( "computeStackSizesSimplePathTracer", &pyoptix::util::computeStackSizesSimplePathTracer );
 
     //--------------------------------------------------------------------------
     //
