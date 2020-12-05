@@ -136,22 +136,22 @@ def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
     stack_sizes = optix.StackSizes()
     for prog_group in program_groups:
         optix.util.accumulateStackSizes( prog_group, stack_sizes )
-    #TODO
 
-    '''
-    uint32_t direct_callable_stack_size_from_traversal;
-    uint32_t direct_callable_stack_size_from_state;
-    uint32_t continuation_stack_size;
-    OPTIX_CHECK( optixUtilComputeStackSizes( &stack_sizes, max_trace_depth,
-                                             0,  // maxCCDepth
-                                             0,  // maxDCDEpth
-                                             &direct_callable_stack_size_from_traversal,
-                                             &direct_callable_stack_size_from_state, &continuation_stack_size ) );
-    OPTIX_CHECK( optixPipelineSetStackSize( pipeline, direct_callable_stack_size_from_traversal,
-                                            direct_callable_stack_size_from_state, continuation_stack_size,
-                                            2  // maxTraversableDepth
-                                            ) );
-    '''
+    (dc_stack_size_from_trav, dc_stack_size_from_state, cc_stack_size) = \
+        optix.util.computeStackSizes( 
+            stack_sizes, 
+            0,  # maxTraceDepth
+            0,  # maxCCDepth
+            0   # maxDCDepth
+            )
+    
+    pipeline.setStackSize( 
+            dc_stack_size_from_trav,
+            dc_stack_size_from_state, 
+            cc_stack_size,
+            2  # maxTraversableDepth
+            )
+
     return pipeline
 
 

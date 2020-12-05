@@ -892,37 +892,41 @@ namespace util
 
 void accumulateStackSizes( 
         pyoptix::ProgramGroup programGroup,
-        OptixStackSizes*  stackSizes 
+        OptixStackSizes&  stackSizes 
         )
 {
     PYOPTIX_CHECK( 
-        optixUtilAccumulateStackSizes( programGroup.programGroup, stackSizes )
+        optixUtilAccumulateStackSizes( programGroup.programGroup, &stackSizes )
     );
 }
 
-void computeStackSizes( 
-        const OptixStackSizes* stackSizes,
+py::tuple computeStackSizes( 
+        const OptixStackSizes& stackSizes,
         unsigned int           maxTraceDepth,
         unsigned int           maxCCDepth,
-        unsigned int           maxDCDepth,
-        unsigned int*          directCallableStackSizeFromTraversal,
-        unsigned int*          directCallableStackSizeFromState,
-        unsigned int*          continuationStackSize 
+        unsigned int           maxDCDepth
         )
 {
+    uint32_t directCallableStackSizeFromTraversal;
+    uint32_t directCallableStackSizeFromState;
+    uint32_t continuationStackSize;
+
     PYOPTIX_CHECK( 
         optixUtilComputeStackSizes(
-            stackSizes,
+            &stackSizes,
             maxTraceDepth,
             maxCCDepth,
             maxDCDepth,
-            directCallableStackSizeFromTraversal,
-            directCallableStackSizeFromState,
-            continuationStackSize 
+            &directCallableStackSizeFromTraversal,
+            &directCallableStackSizeFromState,
+            &continuationStackSize 
             )
         );
+    return py::make_tuple( 
+        directCallableStackSizeFromTraversal,
+        directCallableStackSizeFromState,
+        continuationStackSize );
 }
-
 
 void computeStackSizesDCSplit( 
         const OptixStackSizes* stackSizes,
@@ -1705,7 +1709,9 @@ PYBIND11_MODULE( optix, m )
         ;
 
     py::class_<OptixStackSizes>(m, "StackSizes")
-        .def( py::init([]() { return std::unique_ptr<OptixStackSizes>(new OptixStackSizes{} ); } ) )
+        .def( py::init( []() 
+            { return std::unique_ptr<OptixStackSizes>(new OptixStackSizes{} ); }
+        ) )
         .def_readwrite( "cssRG", &OptixStackSizes::cssRG )
         .def_readwrite( "cssMS", &OptixStackSizes::cssMS )
         .def_readwrite( "cssCH", &OptixStackSizes::cssCH )
