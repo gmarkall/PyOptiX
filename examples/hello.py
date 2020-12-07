@@ -2,10 +2,11 @@
 
 
 import optix
-import cupy  as cp
-import numpy as np
-import ctypes
-from PIL import Image
+
+import cupy  as cp    # CUDA bindings
+import numpy as np    # Packing of structures in C-compatible format
+import ctypes         # c interop helpers
+from PIL import Image # Image IO
 
 
 #-------------------------------------------------------------------------------
@@ -35,6 +36,27 @@ def arrayToDeviceMemory( numpy_array, stream=cp.cuda.Stream() ):
     d_mem = cp.cuda.memory.alloc( byte_size )
     d_mem.copy_from_async( h_ptr, byte_size, stream )
     return d_mem
+
+
+def compileCUDA( cuda_file ):
+    with open( cuda_file, 'rb' ) as f:
+        src = f.read()
+    from pynvrtc.compiler import Program
+    prog = Program( src.decode(), cuda_file )
+    ptx  = prog.compile( [
+        '-use_fast_math', 
+        '-default-device',
+        '-std=c++11',
+        '-arch',
+        'compute_60',
+        '-D__x86_64',
+        '-rdc',
+        'true',
+        '-IC:\\ProgramData\\NVIDIA Corporation\OptiX SDK 7.2.0\include',
+        '-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\CUDA\\v11.1\include'
+        ] )
+    return ptx
+
 
 #-------------------------------------------------------------------------------
 #
@@ -242,6 +264,8 @@ def launch( pipeline, sbt ):
 draw_color_ptx = ''
 with open( "examples/hello.ptx" ) as ptx_file:
     draw_color_ptx = ptx_file.read()
+
+draw_color_ptx = compileCUDA( "examples/hello.cu" )
 
 init_optix()
 ctx = create_ctx()
