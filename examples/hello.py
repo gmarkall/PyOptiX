@@ -47,9 +47,6 @@ def compileCUDA( cuda_file ):
         '-use_fast_math', 
         '-default-device',
         '-std=c++11',
-        '-arch',
-        'compute_60',
-        '-D__x86_64',
         '-rdc',
         'true',
         '-IC:\\ProgramData\\NVIDIA Corporation\OptiX SDK 7.2.0\include',
@@ -75,7 +72,7 @@ def init_optix():
 
 def create_ctx():
     print( "Creating optix device context ..." )
-    cu_ctx      = optix.cuda.Context() # TODO: get rid of optix.cuda.Context
+    cu_ctx      = 0 
     ctx_options = optix.DeviceContextOptions()
 
     # Note that log callback data is no longer needed

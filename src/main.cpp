@@ -27,6 +27,7 @@ namespace py = pybind11;
 
 namespace pyoptix
 {
+
 //
 // Helpers
 //
@@ -38,33 +39,6 @@ void context_log_cb( unsigned int level, const char* tag, const char* message, v
     py::object cb = py::reinterpret_borrow<py::object>( reinterpret_cast<PyObject*>( cbdata ) );
     cb( level, tag, message );
 }
-
-
-//
-// Wrappers for CUDA types
-// 
-
-namespace cuda
-{
-
-
-struct Stream
-{
-    Stream() {}
-    Stream( uint64_t s ) : stream( reinterpret_cast<CUstream>( s ) ) {} // Note NOT explicit
-    Stream( void* s ) : stream( reinterpret_cast<CUstream>( s ) ) {} // Note NOT explicit
-    CUstream stream=0;
-};
-
-struct Context
-{
-    Context() {}
-    Context( uint64_t c ) : context( reinterpret_cast<CUcontext>( c ) ) {} // Note NOT explicit
-    Context( void* c ) : context( reinterpret_cast<CUcontext>( c ) ) {} // Note NOT explicit
-    CUcontext context=0;
-};
-
-} // end namespace cuda
 
 
 //
@@ -155,7 +129,7 @@ const char* getErrorString(
 }
  
 pyoptix::DeviceContext deviceContextCreate( 
-       pyoptix::cuda::Context fromContext,
+       uintptr_t fromContext,
        const pyoptix::DeviceContextOptions& options
     )
 {
@@ -164,7 +138,7 @@ pyoptix::DeviceContext deviceContextCreate(
 
     PYOPTIX_CHECK( 
         optixDeviceContextCreate(
-            fromContext.context,
+            reinterpret_cast<CUcontext>( fromContext ),
             &options.options,
             &(ctx.deviceContext)
         )
@@ -602,7 +576,7 @@ void accelComputeMemoryUsage(
  
 void accelBuild( 
        pyoptix::DeviceContext        context,
-       pyoptix::cuda::Stream         stream,
+       uintptr_t         stream,
        const OptixAccelBuildOptions* accelOptions,
        const OptixBuildInput*        buildInputs,
        unsigned int                  numBuildInputs,
@@ -618,7 +592,7 @@ void accelBuild(
     PYOPTIX_CHECK( 
         optixAccelBuild(
             context.deviceContext,
-            stream.stream,
+            reinterpret_cast<CUstream>( stream ),
             accelOptions,
             buildInputs,
             numBuildInputs,
@@ -665,7 +639,7 @@ void accelCheckRelocationCompatibility(
  
 void accelRelocate( 
        pyoptix::DeviceContext          context,
-       pyoptix::cuda::Stream           stream,
+       uintptr_t           stream,
        const OptixAccelRelocationInfo* info,
        CUdeviceptr                     instanceTraversableHandles,
        size_t                          numInstanceTraversableHandles,
@@ -677,7 +651,7 @@ void accelRelocate(
     PYOPTIX_CHECK( 
         optixAccelRelocate(
             context.deviceContext,
-            stream.stream,
+            reinterpret_cast<CUstream>( stream ),
             info,
             instanceTraversableHandles,
             numInstanceTraversableHandles,
@@ -690,7 +664,7 @@ void accelRelocate(
  
 void accelCompact( 
        pyoptix::DeviceContext  context,
-       pyoptix::cuda::Stream   stream,
+       uintptr_t   stream,
        OptixTraversableHandle  inputHandle,
        CUdeviceptr             outputBuffer,
        size_t                  outputBufferSizeInBytes,
@@ -700,7 +674,7 @@ void accelCompact(
     PYOPTIX_CHECK( 
         optixAccelCompact(
             context.deviceContext,
-            stream.stream,
+            reinterpret_cast<CUstream>( stream ),
             inputHandle,
             outputBuffer,
             outputBufferSizeInBytes,
@@ -788,7 +762,7 @@ void denoiserComputeMemoryResources(
  
 void denoiserSetup( 
        pyoptix::Denoiser denoiser,
-       pyoptix::cuda::Stream stream,
+       uintptr_t stream,
        unsigned int  inputWidth,
        unsigned int  inputHeight,
        CUdeviceptr   denoiserState,
@@ -800,7 +774,7 @@ void denoiserSetup(
     PYOPTIX_CHECK( 
         optixDenoiserSetup(
             denoiser.denoiser,
-            stream.stream,
+            reinterpret_cast<CUstream>( stream ),
             inputWidth,
             inputHeight,
             denoiserState,
@@ -813,7 +787,7 @@ void denoiserSetup(
  
 void denoiserInvoke( 
        pyoptix::Denoiser          denoiser,
-       pyoptix::cuda::Stream      stream,
+       uintptr_t      stream,
        const OptixDenoiserParams* params,
        CUdeviceptr                denoiserState,
        size_t                     denoiserStateSizeInBytes,
@@ -829,7 +803,7 @@ void denoiserInvoke(
     PYOPTIX_CHECK( 
         optixDenoiserInvoke(
             denoiser.denoiser,
-            stream.stream,
+            reinterpret_cast<CUstream>( stream ),
             params,
             denoiserState,
             denoiserStateSizeInBytes,
@@ -846,7 +820,7 @@ void denoiserInvoke(
  
 void denoiserComputeIntensity( 
        pyoptix::Denoiser   denoiser,
-       pyoptix::cuda::Stream stream,
+       uintptr_t stream,
        const OptixImage2D* inputImage,
        CUdeviceptr         outputIntensity,
        CUdeviceptr         scratch,
@@ -856,7 +830,7 @@ void denoiserComputeIntensity(
     PYOPTIX_CHECK( 
         optixDenoiserComputeIntensity(
             denoiser.denoiser,
-            stream.stream,
+            reinterpret_cast<CUstream>( stream ),
             inputImage,
             outputIntensity,
             scratch,
@@ -867,7 +841,7 @@ void denoiserComputeIntensity(
  
 void denoiserComputeAverageColor( 
        pyoptix::Denoiser   denoiser,
-       pyoptix::cuda::Stream stream,
+       uintptr_t stream,
        const OptixImage2D* inputImage,
        CUdeviceptr         outputAverageColor,
        CUdeviceptr         scratch,
@@ -877,7 +851,7 @@ void denoiserComputeAverageColor(
     PYOPTIX_CHECK( 
         optixDenoiserComputeAverageColor(
             denoiser.denoiser,
-            stream.stream,
+            reinterpret_cast<CUstream>( stream ),
             inputImage,
             outputAverageColor,
             scratch,
@@ -1042,23 +1016,7 @@ PYBIND11_MODULE( optix, m )
     m.def( "sbtRecordPackHeader", &pyoptix::sbtRecordPackHeader );
     m.def( "convertPointerToTraversableHandle", &pyoptix::convertPointerToTraversableHandle );
 
-    //--------------------------------------------------------------------------
-    //
-    // Structs for interfacing with CUDA
-    // TODO: this goes away
-    //
-    //--------------------------------------------------------------------------
-    auto m_cuda = m.def_submodule( "cuda", nullptr /*TODO: docstring*/ );
-    py::class_<pyoptix::cuda::Stream>(m_cuda, "Stream")
-        .def( py::init<>() )
-        .def( py::init<uint64_t>() )
-        ;
-    
-    py::class_<pyoptix::cuda::Context>(m_cuda, "Context")
-        .def( py::init<>() )
-        .def( py::init<uint64_t>() )
-        ;
-    
+
     //--------------------------------------------------------------------------
     //
     // Structs for interfacing with CUDA
