@@ -5,7 +5,7 @@ import optix
 
 import cupy  as cp    # CUDA bindings
 import numpy as np    # Packing of structures in C-compatible format
-import ctypes         # c interop helpers
+import ctypes         # C interop helpers
 from PIL import Image # Image IO
 
 
@@ -28,7 +28,24 @@ def log_callback( level, tag, mssg ):
     print( "[{:>2}][{:>12}]: {}".format( level, tag, mssg ) )
     
 
-def arrayToDeviceMemory( numpy_array, stream=cp.cuda.Stream() ):
+def round_up( val, mult_of ):
+    return val if val % mult_of == 0 else val + mult_of - val % mult_of 
+
+
+def  get_aligned_itemsize( formats, alignment ):
+    names = []
+    for i in range( len(formats ) ):
+        names.append( 'x'+str(i) )
+
+    temp_dtype = np.dtype( { 
+        'names'   : names,
+        'formats' : formats, 
+        'align'   : True
+        } )
+    return round_up( temp_dtype.itemsize, alignment )
+
+
+def array_to_device_memory( numpy_array, stream=cp.cuda.Stream() ):
 
     byte_size = numpy_array.size*numpy_array.dtype.itemsize
 
@@ -38,7 +55,7 @@ def arrayToDeviceMemory( numpy_array, stream=cp.cuda.Stream() ):
     return d_mem
 
 
-def compileCUDA( cuda_file ):
+def compile_cuda( cuda_file ):
     with open( cuda_file, 'rb' ) as f:
         src = f.read()
     from pynvrtc.compiler import Program
@@ -60,7 +77,6 @@ def compileCUDA( cuda_file ):
 # Optix setup
 #
 #-------------------------------------------------------------------------------
-
 
 def init_optix():
     print( "Initializing cuda ..." )
@@ -85,27 +101,37 @@ def create_ctx():
     return optix.deviceContextCreate( cu_ctx, ctx_options )
 
 
-def create_module( ctx, pipeline_options ):
+def set_pipeline_options():
+    pipeline_options = optix.PipelineCompileOptions()
+    pipeline_options.usesMotionBlur        = False;
+    pipeline_options.traversableGraphFlags = optix.TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING;
+    pipeline_options.numPayloadValues      = 2;
+    pipeline_options.numAttributeValues    = 2;
+    pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE;
+    pipeline_options.pipelineLaunchParamsVariableName = "params";
+    return pipeline_options
+
+
+def create_module( ctx, pipeline_options, hello_ptx ):
     print( "Creating optix module ..." )
 
     module_options = optix.ModuleCompileOptions()
-    # TODO: need to wrap #defines (eg, optix.COMPILE_DEFAULT_MAX_REGISTER_COUNT)
-    module_options.maxRegisterCount = 0 
-    module_options.optLevel         = optix.COMPILE_OPTIMIZATION_DEFAULT
+    module_options.maxRegisterCount = optix.COMPILE_DEFAULT_MAX_REGISTER_COUNT  # non-typed constant
+    module_options.optLevel         = optix.COMPILE_OPTIMIZATION_DEFAULT # Typed enum
     module_options.debugLevel       = optix.COMPILE_DEBUG_LEVEL_LINEINFO
 
     log = ""
     module = ctx.moduleCreateFromPTX(
             module_options,
             pipeline_options,
-            draw_color_ptx,
+            hello_ptx,
             log
             )
     print( "\tModule create log: <<<{}>>>".format( log ) )
     return module
 
 
-def create_program_groups( ctx ):
+def create_program_groups( ctx, module ):
     print( "Creating program groups ... " )
     # TODO: optix.ProgramGroup.Options() ?
     program_group_options = optix.ProgramGroupOptions();
@@ -140,7 +166,7 @@ def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
     max_trace_depth  = 0;
     program_groups = [ raygen_prog_group ]
 
-    pipeline_link_options = optix.PipelineLinkOptions() 
+    pipeline_link_options               = optix.PipelineLinkOptions() 
     pipeline_link_options.maxTraceDepth = max_trace_depth;
     pipeline_link_options.debugLevel    = optix.COMPILE_DEBUG_LEVEL_FULL;
 
@@ -180,31 +206,37 @@ def create_sbt( raygen_prog_group, miss_prog_group ):
     global d_raygen_sbt
     global d_miss_sbt
 
+    header_format = '{}B'.format( optix.SBT_RECORD_HEADER_SIZE )
+
     #
     # raygen record
     #
+    formats  = [ header_format, 'f4', 'f4', 'f4' ]
+    itemsize = get_aligned_itemsize( formats, optix.SBT_RECORD_ALIGNMENT )
     dtype = np.dtype( { 
         'names'   : ['header', 'r', 'g', 'b' ],
-        'formats' : ['32B', 'f4', 'f4', 'f4'],
-        'itemsize': 48,
+        'formats' : formats, 
+        'itemsize': itemsize,
         'align'   : True
         } )
     h_raygen_sbt = np.array( [ (0, 0.462, 0.725, 0.0 ) ], dtype=dtype )
     optix.sbtRecordPackHeader( raygen_prog_group, h_raygen_sbt )
-    d_raygen_sbt = arrayToDeviceMemory( h_raygen_sbt )
+    d_raygen_sbt = array_to_device_memory( h_raygen_sbt )
     
     #
     # miss record
     #
+    formats  = [ header_format, 'i4']
+    itemsize = get_aligned_itemsize( formats, optix.SBT_RECORD_ALIGNMENT )
     dtype = np.dtype( { 
         'names'   : ['header', 'x' ],
-        'formats' : ['32B', 'i4'],
-        'itemsize': 48,
+        'formats' : formats,
+        'itemsize': itemsize,
         'align'   : True
         } )
     h_miss_sbt = np.array( [ (0, 127 ) ], dtype=dtype )
     optix.sbtRecordPackHeader( miss_prog_group, h_miss_sbt )
-    d_miss_sbt = arrayToDeviceMemory( h_miss_sbt )
+    d_miss_sbt = array_to_device_memory( h_miss_sbt )
     
     sbt = optix.ShaderBindingTable();
     sbt.raygenRecord                = d_raygen_sbt.ptr
@@ -231,7 +263,7 @@ def launch( pipeline, sbt ):
         'align'   : True
         } )
     h_params = np.array( [ ( d_pix.data.ptr, pix_width ) ], dtype=params_dtype )
-    d_params = arrayToDeviceMemory( h_params )
+    d_params = array_to_device_memory( h_params )
 
     stream = cp.cuda.Stream()
     optix.launch( 
@@ -258,33 +290,25 @@ def launch( pipeline, sbt ):
 #-------------------------------------------------------------------------------
 
 
-draw_color_ptx = ''
-with open( "examples/hello.ptx" ) as ptx_file:
-    draw_color_ptx = ptx_file.read()
+def main():
+    hello_ptx = compile_cuda( "examples/hello.cu" )
 
-draw_color_ptx = compileCUDA( "examples/hello.cu" )
+    init_optix()
 
-init_optix()
-ctx = create_ctx()
+    ctx              = create_ctx()
+    pipeline_options = set_pipeline_options()
+    module           = create_module( ctx, pipeline_options, hello_ptx )
+    raygen_prog_group, miss_prog_group = create_program_groups( ctx, module )
+    pipeline         = create_pipeline( ctx, raygen_prog_group, pipeline_options )
+    sbt              = create_sbt( raygen_prog_group, miss_prog_group ) 
+    pix              = launch( pipeline, sbt ) 
 
-pipeline_options = optix.PipelineCompileOptions()
-pipeline_options.usesMotionBlur        = False;
-pipeline_options.traversableGraphFlags = optix.TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING;
-pipeline_options.numPayloadValues      = 2;
-pipeline_options.numAttributeValues    = 2;
-pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE;
-pipeline_options.pipelineLaunchParamsVariableName = "params";
+    print( "Total number of log messages: {}".format( logger.num_mssgs ) )
 
-module   = create_module( ctx, pipeline_options )
-raygen_prog_group, miss_prog_group = create_program_groups( ctx )
-pipeline = create_pipeline( ctx, raygen_prog_group, pipeline_options )
-sbt      = create_sbt( raygen_prog_group, miss_prog_group ) 
-pix      = launch( pipeline, sbt ) 
-
-print( "Total number of log messages: {}".format( logger.num_mssgs ) )
-
-img = Image.fromarray(pix, 'RGBA')
-img.save('my.png')
-img.show()
+    img = Image.fromarray(pix, 'RGBA')
+    img.save('my.png')
+    img.show()
 
 
+if __name__ == "__main__":
+    main()

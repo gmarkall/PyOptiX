@@ -1029,11 +1029,28 @@ PYBIND11_MODULE( optix, m )
     m_util.def( "computeStackSizesCssCCTree", &pyoptix::util::computeStackSizesCssCCTree );
     m_util.def( "computeStackSizesSimplePathTracer", &pyoptix::util::computeStackSizesSimplePathTracer );
 
+
+    //--------------------------------------------------------------------------
+    //
+    // defines 
+    //
+    //--------------------------------------------------------------------------
+
+    m.attr( "SBT_RECORD_HEADER_SIZE"             ) = OPTIX_SBT_RECORD_HEADER_SIZE;
+    m.attr( "SBT_RECORD_ALIGNMENT"               ) = OPTIX_SBT_RECORD_ALIGNMENT;
+    m.attr( "ACCEL_BUFFER_BYTE_ALIGNMENT"        ) = OPTIX_ACCEL_BUFFER_BYTE_ALIGNMENT;
+    m.attr( "INSTANCE_BYTE_ALIGNMENT"            ) = OPTIX_INSTANCE_BYTE_ALIGNMENT;
+    m.attr( "AABB_BUFFER_BYTE_ALIGNMENT"         ) = OPTIX_AABB_BUFFER_BYTE_ALIGNMENT;
+    m.attr( "GEOMETRY_TRANSFORM_BYTE_ALIGNMENT"  ) = OPTIX_GEOMETRY_TRANSFORM_BYTE_ALIGNMENT;
+    m.attr( "TRANSFORM_BYTE_ALIGNMENT"           ) = OPTIX_TRANSFORM_BYTE_ALIGNMENT;
+    m.attr( "COMPILE_DEFAULT_MAX_REGISTER_COUNT" ) = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
+
     //--------------------------------------------------------------------------
     //
     // Enumerations 
     //
     //--------------------------------------------------------------------------
+
 
     py::enum_<OptixResult>(m, "Result")
         .value( "SUCCESS", OPTIX_SUCCESS )
