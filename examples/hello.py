@@ -102,13 +102,14 @@ def create_ctx():
 
 
 def set_pipeline_options():
-    pipeline_options = optix.PipelineCompileOptions()
-    pipeline_options.usesMotionBlur        = False;
-    pipeline_options.traversableGraphFlags = optix.TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING;
-    pipeline_options.numPayloadValues      = 2;
-    pipeline_options.numAttributeValues    = 2;
-    pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE;
-    pipeline_options.pipelineLaunchParamsVariableName = "params";
+    pipeline_options = optix.PipelineCompileOptions(
+            usesMotionBlur=False)
+    pipeline_options.usesMotionBlur        = False # int
+    pipeline_options.traversableGraphFlags = optix.TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING
+    pipeline_options.numPayloadValues      = 2
+    pipeline_options.numAttributeValues    = 2
+    pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE
+    pipeline_options.pipelineLaunchParamsVariableName = "params"
     return pipeline_options
 
 
@@ -134,13 +135,13 @@ def create_module( ctx, pipeline_options, hello_ptx ):
 def create_program_groups( ctx, module ):
     print( "Creating program groups ... " )
     # TODO: optix.ProgramGroup.Options() ?
-    program_group_options = optix.ProgramGroupOptions();
+    program_group_options = optix.ProgramGroupOptions()
 
     # TODO: optix.ProgramGroup.Kind.RAYGEN ?
     raygen_prog_group_desc  = optix.ProgramGroupDesc()
-    raygen_prog_group_desc.kind                     = optix.PROGRAM_GROUP_KIND_RAYGEN; 
-    raygen_prog_group_desc.raygenModule             = module;
-    raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__hello";
+    raygen_prog_group_desc.kind                     = optix.PROGRAM_GROUP_KIND_RAYGEN 
+    raygen_prog_group_desc.raygenModule             = module
+    raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__hello"
 
     log = ""
     raygen_prog_group = ctx.programGroupCreate(
@@ -148,27 +149,30 @@ def create_program_groups( ctx, module ):
             program_group_options,
             log
             )
+    print( "\tProgramGroup raygen create log: <<<{}>>>".format( log ) )
 
     # Leave miss group's module and entryfunc name null
     miss_prog_group_desc  = optix.ProgramGroupDesc()
-    miss_prog_group_desc.kind = optix.PROGRAM_GROUP_KIND_MISS;
+    miss_prog_group_desc.kind = optix.PROGRAM_GROUP_KIND_MISS
+
     miss_prog_group = ctx.programGroupCreate(
             [ miss_prog_group_desc ],
             program_group_options,
             log
             )
+    print( "\tProgramGroup miss create log: <<<{}>>>".format( log ) )
 
     return ( raygen_prog_group[0], miss_prog_group[0] )
 
 
 def create_pipeline( ctx, raygen_prog_group, pipeline_compile_options ):
     print( "Creating pipeline ... " )
-    max_trace_depth  = 0;
+    max_trace_depth  = 0
     program_groups = [ raygen_prog_group ]
 
     pipeline_link_options               = optix.PipelineLinkOptions() 
-    pipeline_link_options.maxTraceDepth = max_trace_depth;
-    pipeline_link_options.debugLevel    = optix.COMPILE_DEBUG_LEVEL_FULL;
+    pipeline_link_options.maxTraceDepth = max_trace_depth
+    pipeline_link_options.debugLevel    = optix.COMPILE_DEBUG_LEVEL_FULL
 
     log = ""
     pipeline = ctx.pipelineCreate(
@@ -238,7 +242,7 @@ def create_sbt( raygen_prog_group, miss_prog_group ):
     optix.sbtRecordPackHeader( miss_prog_group, h_miss_sbt )
     d_miss_sbt = array_to_device_memory( h_miss_sbt )
     
-    sbt = optix.ShaderBindingTable();
+    sbt = optix.ShaderBindingTable()
     sbt.raygenRecord                = d_raygen_sbt.ptr
     sbt.missRecordBase              = d_miss_sbt.ptr
     sbt.missRecordStrideInBytes     = d_miss_sbt.mem.size
@@ -305,8 +309,8 @@ def main():
 
     print( "Total number of log messages: {}".format( logger.num_mssgs ) )
 
-    img = Image.fromarray(pix, 'RGBA')
-    img.save('my.png')
+    img = Image.fromarray( pix, 'RGBA' )
+    img.save( 'my.png' )
     img.show()
 
 

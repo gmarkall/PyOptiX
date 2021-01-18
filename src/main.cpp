@@ -56,7 +56,26 @@ struct DeviceContextOptions
 
 struct PipelineCompileOptions
 {
-    // all char* need to be backed by strings
+    PipelineCompileOptions( 
+        int32_t   usesMotionBlur,
+        uint32_t  traversableGraphFlags,
+        int32_t   numPayloadValues,
+        int32_t   numAttributeValues,
+        uint32_t  exceptionFlags,
+        const char* pipelineLaunchParamsVariableName_,
+        uint32_t  usesPrimitiveTypeFlags
+        )
+        {
+            options.usesMotionBlur         = usesMotionBlur;
+            options.traversableGraphFlags  = traversableGraphFlags;
+            options.numPayloadValues       = numPayloadValues;
+            options.numAttributeValues     = numAttributeValues;
+            options.exceptionFlags         = exceptionFlags;
+            options.usesPrimitiveTypeFlags = usesPrimitiveTypeFlags;
+            
+            if( pipelineLaunchParamsVariableName_ )
+                pipelineLaunchParamsVariableName = pipelineLaunchParamsVariableName_;
+        }
     std::string pipelineLaunchParamsVariableName;
     OptixPipelineCompileOptions options;
 };
@@ -1045,12 +1064,12 @@ PYBIND11_MODULE( optix, m )
     m.attr( "TRANSFORM_BYTE_ALIGNMENT"           ) = OPTIX_TRANSFORM_BYTE_ALIGNMENT;
     m.attr( "COMPILE_DEFAULT_MAX_REGISTER_COUNT" ) = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
 
+
     //--------------------------------------------------------------------------
     //
     // Enumerations 
     //
     //--------------------------------------------------------------------------
-
 
     py::enum_<OptixResult>(m, "Result")
         .value( "SUCCESS", OPTIX_SUCCESS )
@@ -1617,9 +1636,26 @@ PYBIND11_MODULE( optix, m )
         ;
 
     py::class_<pyoptix::PipelineCompileOptions>(m, "PipelineCompileOptions")
-        .def( py::init( []() 
-            { return std::unique_ptr<pyoptix::PipelineCompileOptions>(new pyoptix::PipelineCompileOptions{} ); } 
-        ) )
+        //.def( py::init( []() 
+        //    { return std::unique_ptr<pyoptix::PipelineCompileOptions>(new pyoptix::PipelineCompileOptions{} ); } 
+        //) )
+        .def( 
+            py::init<
+                int32_t,
+                uint32_t,
+                int32_t,
+                int32_t,
+                uint32_t,
+                const char*,
+                uint32_t>(), 
+            py::arg( "usesMotionBlur" )=0,
+            py::arg( "traversableGraphFlags" )=0,
+            py::arg( "numPayloadValues" )=0,
+            py::arg( "numAttributeValues" )=0,
+            py::arg( "exceptionFlags" )=0,
+            py::arg( "pipelineLaunchParamsVariableName" )=nullptr,
+            py::arg( "usesPrimitiveTypeFlags" )=0
+            )
         .def_property( "usesMotionBlur",
             [](const pyoptix::PipelineCompileOptions& self) 
             { return self.options.usesMotionBlur; },
@@ -1723,7 +1759,6 @@ PYBIND11_MODULE( optix, m )
         .def( "moduleCreateFromPTX", &pyoptix::moduleCreateFromPTX )
         .def( "moduleBuiltinISGet", &pyoptix::builtinISModuleGet )
         .def( "programGroupCreate", &pyoptix::programGroupCreate )
-        /*
         .def( "accelComputeMemoryUsage", &pyoptix::accelComputeMemoryUsage )
         .def( "accelBuild", &pyoptix::accelBuild )
         .def( "accelGetRelocationInfo", &pyoptix::accelGetRelocationInfo )
@@ -1731,7 +1766,6 @@ PYBIND11_MODULE( optix, m )
         .def( "accelRelocate", &pyoptix::accelRelocate )
         .def( "accelCompact", &pyoptix::accelCompact )
         .def( "denoiserCreate", &pyoptix::denoiserCreate )
-        */
         ;
 
     py::class_<pyoptix::Module>( m, "Module" )
