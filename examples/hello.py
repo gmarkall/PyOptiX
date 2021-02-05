@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 
 
 import optix
@@ -66,8 +66,10 @@ def compile_cuda( cuda_file ):
         '-std=c++11',
         '-rdc',
         'true',
-        '-IC:\\ProgramData\\NVIDIA Corporation\OptiX SDK 7.2.0\include',
-        '-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\CUDA\\v11.1\include'
+        #'-IC:\\ProgramData\\NVIDIA Corporation\OptiX SDK 7.2.0\include',
+        #'-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\CUDA\\v11.1\include'
+        '-I/usr/local/cuda/include',
+        '-I/home/kmorley/Code/support/NVIDIA-OptiX-SDK-7.2.0-linux64-x86_64/include/'
         ] )
     return ptx
 
@@ -88,16 +90,22 @@ def init_optix():
 
 def create_ctx():
     print( "Creating optix device context ..." )
-    cu_ctx      = 0 
-    ctx_options = optix.DeviceContextOptions()
 
-    # Note that log callback data is no longer needed
     global logger
     logger = Logger()
-    ctx_options.logCallbackLevel    = 4
-    ctx_options.logCallbackFunction = logger
-    #ctx_options.logCallbackFunction = log_callback 
+    
+    # OptiX param struct fields can be set with optional
+    # keyword constsructor arguments.
+    # Note that log callback data is no longer needed
+    ctx_options = optix.DeviceContextOptions(
+            logCallbackFunction = logger
+            #,logCallbackLevel = 3
+            )
 
+    # They can also be set and queried as properties on the struct
+    ctx_options.logCallbackLevel = 4
+
+    cu_ctx = 0 
     return optix.deviceContextCreate( cu_ctx, ctx_options )
 
 

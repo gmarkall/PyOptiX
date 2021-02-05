@@ -36,7 +36,9 @@ constexpr size_t LOG_BUFFER_MAX_SIZE = 2048u;
 
 void context_log_cb( unsigned int level, const char* tag, const char* message, void* cbdata  )
 {
-    py::object cb = py::reinterpret_borrow<py::object>( reinterpret_cast<PyObject*>( cbdata ) );
+    py::object cb = py::reinterpret_borrow<py::object>( 
+        reinterpret_cast<PyObject*>( cbdata )
+        );
     cb( level, tag, message );
 }
 
@@ -47,8 +49,25 @@ void context_log_cb( unsigned int level, const char* tag, const char* message, v
 
 struct DeviceContextOptions
 {
-    // This proxy object exists to pass along a py::object function for the log
-    // callback so that it is correctly reference counted
+    DeviceContextOptions(
+       py::object log_callback_function, 
+       int32_t    log_callback_level,
+       OptixDeviceContextValidationMode validation_mode
+       )
+    {
+        logCallbackFunction         = log_callback_function;
+        if( !logCallbackFunction.is_none() )
+        {
+            options.logCallbackFunction = pyoptix::context_log_cb;
+            options.logCallbackData     = logCallbackFunction.ptr();
+        }
+
+        options.logCallbackLevel    = log_callback_level;
+        options.validationMode      = validation_mode;
+    }
+
+
+    // Log callback needs additional backing
     py::object logCallbackFunction;
     OptixDeviceContextOptions options;
 };
@@ -74,8 +93,11 @@ struct PipelineCompileOptions
             options.usesPrimitiveTypeFlags = usesPrimitiveTypeFlags;
             
             if( pipelineLaunchParamsVariableName_ )
-                pipelineLaunchParamsVariableName = pipelineLaunchParamsVariableName_;
+                pipelineLaunchParamsVariableName = 
+                    pipelineLaunchParamsVariableName_;
         }
+
+    // Strings need extra backing
     std::string pipelineLaunchParamsVariableName;
     OptixPipelineCompileOptions options;
 };
@@ -176,35 +198,65 @@ void deviceContextDestroy(
     );
 }
  
-void deviceContextGetProperty( 
+py::object deviceContextGetProperty( 
        pyoptix::DeviceContext context,
-       OptixDeviceProperty property,
-       void* value,
-       size_t sizeInBytes
+       OptixDeviceProperty property
     )
 {
-    PYOPTIX_CHECK( 
-        optixDeviceContextGetProperty(
-            context.deviceContext,
-            property,
-            value,
-            sizeInBytes
-        )
-    );
+    switch( property )
+    {
+        // uint32_t
+        case OPTIX_DEVICE_PROPERTY_LIMIT_MAX_TRACE_DEPTH:
+        case OPTIX_DEVICE_PROPERTY_LIMIT_MAX_TRAVERSABLE_GRAPH_DEPTH:
+        case OPTIX_DEVICE_PROPERTY_LIMIT_MAX_PRIMITIVES_PER_GAS:
+        case OPTIX_DEVICE_PROPERTY_LIMIT_MAX_INSTANCES_PER_IAS:
+        case OPTIX_DEVICE_PROPERTY_RTCORE_VERSION:
+        case OPTIX_DEVICE_PROPERTY_LIMIT_MAX_INSTANCE_ID:
+        case OPTIX_DEVICE_PROPERTY_LIMIT_NUM_BITS_INSTANCE_VISIBILITY_MASK:
+        case OPTIX_DEVICE_PROPERTY_LIMIT_MAX_SBT_RECORDS_PER_GAS:
+        case OPTIX_DEVICE_PROPERTY_LIMIT_MAX_SBT_OFFSET:
+        {
+            uint32_t value = 0u;
+            PYOPTIX_CHECK( 
+                optixDeviceContextGetProperty(
+                    context.deviceContext,
+                    property,
+                    &value,
+                    sizeof( uint32_t ) 
+                )
+            );
+            return py::int_( value );
+        } 
+        default:
+        {
+            throw std::runtime_error( 
+                "Unrecognized optix.DeviceProperty passed to "
+                "DeviceContext.getProperty()"  
+                );
+        } 
+    }
 }
  
 void deviceContextSetLogCallback( 
        pyoptix::DeviceContext context,
-       OptixLogCallback   callbackFunction,
-       void*              callbackData,
-       unsigned int       callbackLevel
+       py::object             callbackFunction, 
+       uint32_t               callbackLevel
     )
 {
+    context.logCallbackFunction = callbackFunction;
+    OptixLogCallback cb         = nullptr;
+    void*            cb_data    = nullptr;
+    if( !context.logCallbackFunction.is_none() )
+    {
+        cb      = context_log_cb; 
+        cb_data = context.logCallbackFunction.ptr();
+    }
+
     PYOPTIX_CHECK( 
         optixDeviceContextSetLogCallback(
             context.deviceContext,
-            callbackFunction,
-            callbackData,
+            cb,
+            cb_data,
             callbackLevel
         )
     );
@@ -251,25 +303,27 @@ void deviceContextSetCacheDatabaseSizes(
     );
 }
  
-void deviceContextGetCacheEnabled( 
-       pyoptix::DeviceContext context,
-       int* enabled
+py::bool_ deviceContextGetCacheEnabled( 
+       pyoptix::DeviceContext context
     )
 {
+    int32_t enabled = 0;
     PYOPTIX_CHECK( 
         optixDeviceContextGetCacheEnabled(
             context.deviceContext,
-            enabled
+            &enabled
         )
     );
+
+    return py::bool_( enabled );
 }
  
-void deviceContextGetCacheLocation( 
-       pyoptix::DeviceContext context,
-       char* location,
-       size_t locationSize
+py::str deviceContextGetCacheLocation( 
+       pyoptix::DeviceContext context
     )
 {
+   constexpr size_t locationSize = 1024u;
+   char location[ locationSize ];
     PYOPTIX_CHECK( 
         optixDeviceContextGetCacheLocation(
             context.deviceContext,
@@ -277,29 +331,30 @@ void deviceContextGetCacheLocation(
             locationSize
         )
     );
+    return py::str( location );
 }
  
-void deviceContextGetCacheDatabaseSizes( 
-       pyoptix::DeviceContext context,
-       size_t* lowWaterMark,
-       size_t* highWaterMark
+py::tuple deviceContextGetCacheDatabaseSizes( 
+       pyoptix::DeviceContext context
     )
 {
+    size_t lowWaterMark;
+    size_t highWaterMark;
     PYOPTIX_CHECK( 
         optixDeviceContextGetCacheDatabaseSizes(
             context.deviceContext,
-            lowWaterMark,
-            highWaterMark
+            &lowWaterMark,
+            &highWaterMark
         )
     );
+    return py::make_tuple( lowWaterMark, highWaterMark );
 }
  
 
-// TODO: get tid of numProgramGroups
 pyoptix::Pipeline pipelineCreate( 
        pyoptix::DeviceContext                 context,
        const pyoptix::PipelineCompileOptions& pipelineCompileOptions,
-       const OptixPipelineLinkOptions&    pipelineLinkOptions,
+       const OptixPipelineLinkOptions&        pipelineLinkOptions,
        const py::list&                        programGroups,
        std::string&                           logString
     )
@@ -454,7 +509,7 @@ py::list programGroupCreate(
     for( auto list_elem : programDescriptions )
     {
         pyoptix::ProgramGroupDesc& pydesc = 
-		list_elem.cast<pyoptix::ProgramGroupDesc&>();
+        list_elem.cast<pyoptix::ProgramGroupDesc&>();
         switch( pydesc.program_group_desc.kind )
         {
             case OPTIX_PROGRAM_GROUP_KIND_RAYGEN:
@@ -539,10 +594,10 @@ void launch(
     char buf[128];
     cudaError res = cudaMemcpy( 
         buf, 
-	(void*)sbt.raygenRecord, 
-	48, 
-	cudaMemcpyDeviceToHost 
-	);
+    (void*)sbt.raygenRecord, 
+    48, 
+    cudaMemcpyDeviceToHost 
+    );
     res = cudaMemcpy( buf, (void*)sbt.missRecordBase, 48, cudaMemcpyDeviceToHost );
     PYOPTIX_CHECK( 
         optixLaunch(
@@ -1329,34 +1384,34 @@ PYBIND11_MODULE( optix, m )
     //---------------------------------------------------------------------------
 
     py::class_<pyoptix::DeviceContextOptions>(m, "DeviceContextOptions")
-        .def( py::init( []() { 
-            return std::unique_ptr<pyoptix::DeviceContextOptions>( 
-                new pyoptix::DeviceContextOptions{} 
-            ); 
-        } ) )
+        .def( 
+            py::init< py::object, int32_t, OptixDeviceContextValidationMode>(), 
+            py::arg( "logCallbackFunction" )=py::none(), 
+            py::arg( "logCallbackLevel"    )=0,
+            py::arg( "validationMode"      )=OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_OFF
+        )
         .def_property( "logCallbackFunction", 
-                [](const pyoptix::DeviceContextOptions& self) 
-                { return self.logCallbackFunction; }, 
-                [](pyoptix::DeviceContextOptions& self, py::object val)
-                { 
-                    self.logCallbackFunction= val; 
-                    self.options.logCallbackFunction = pyoptix::context_log_cb; 
-                    self.options.logCallbackData = val.ptr();
-                }
-            )
+            [](const pyoptix::DeviceContextOptions& self) 
+            { return self.logCallbackFunction; }, 
+            [](pyoptix::DeviceContextOptions& self, py::object val)
+            { 
+                self.logCallbackFunction= val; 
+                self.options.logCallbackFunction = pyoptix::context_log_cb; 
+                self.options.logCallbackData = val.ptr();
+            }
+        )
         .def_property("logCallbackLevel", 
-                [](const pyoptix::DeviceContextOptions& self) 
-                { return self.options.logCallbackLevel;}, 
-                [](pyoptix::DeviceContextOptions& self, int val) 
-                { self.options.logCallbackLevel = val; }
-            )
+            [](const pyoptix::DeviceContextOptions& self) 
+            { return self.options.logCallbackLevel;}, 
+            [](pyoptix::DeviceContextOptions& self, int val) 
+            { self.options.logCallbackLevel = val; }
+        )
         .def_property("validationMode", 
-                [](const pyoptix::DeviceContextOptions& self) 
-                { return self.options.validationMode; }, 
-                [](pyoptix::DeviceContextOptions& self, OptixDeviceContextValidationMode val) 
-                { self.options.validationMode = val; }
-            )
-        ;
+            [](const pyoptix::DeviceContextOptions& self) 
+            { return self.options.validationMode; }, 
+            [](pyoptix::DeviceContextOptions& self, OptixDeviceContextValidationMode val) 
+            { self.options.validationMode = val; }
+        );
 
     py::class_<OptixBuildInputTriangleArray>(m, "BuildInputTriangleArray")
         .def( py::init([]() { return std::unique_ptr<OptixBuildInputTriangleArray>(new OptixBuildInputTriangleArray{} ); } ) )
