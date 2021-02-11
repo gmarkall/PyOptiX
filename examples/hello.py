@@ -2,9 +2,10 @@
 
 
 import optix
-
 import cupy  as cp    # CUDA bindings
 import numpy as np    # Packing of structures in C-compatible format
+
+import array
 import ctypes         # C interop helpers
 from PIL import Image # Image IO
 
@@ -14,6 +15,8 @@ from PIL import Image # Image IO
 # Util 
 #
 #-------------------------------------------------------------------------------
+pix_width  = 512
+pix_height = 512
 
 class Logger:
     def __init__( self ):
@@ -62,6 +65,7 @@ def compile_cuda( cuda_file ):
     prog = Program( src.decode(), cuda_file )
     ptx  = prog.compile( [
         '-use_fast_math', 
+        '-lineinfo',
         '-default-device',
         '-std=c++11',
         '-rdc',
@@ -91,50 +95,69 @@ def init_optix():
 def create_ctx():
     print( "Creating optix device context ..." )
 
+    # Note that log callback data is no longer needed.  We can
+    # instead send a callable class instance as the log-function
+    # which stores any data needed
     global logger
     logger = Logger()
     
     # OptiX param struct fields can be set with optional
-    # keyword constsructor arguments.
-    # Note that log callback data is no longer needed
-    ctx_options = optix.DeviceContextOptions(
-            logCallbackFunction = logger
-            #,logCallbackLevel = 3
+    # keyword constructor arguments.
+    ctx_options = optix.DeviceContextOptions( 
+            logCallbackFunction = logger,
+            logCallbackLevel    = 4
             )
 
     # They can also be set and queried as properties on the struct
-    ctx_options.logCallbackLevel = 4
+    ctx_options.validationMode = optix.DEVICE_CONTEXT_VALIDATION_MODE_ALL 
 
     cu_ctx = 0 
     return optix.deviceContextCreate( cu_ctx, ctx_options )
 
 
 def set_pipeline_options():
-    pipeline_options = optix.PipelineCompileOptions(
-            usesMotionBlur=False)
-    pipeline_options.usesMotionBlur        = False # int
-    pipeline_options.traversableGraphFlags = optix.TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING
-    pipeline_options.numPayloadValues      = 2
-    pipeline_options.numAttributeValues    = 2
-    pipeline_options.exceptionFlags        = optix.EXCEPTION_FLAG_NONE
-    pipeline_options.pipelineLaunchParamsVariableName = "params"
-    return pipeline_options
+    return optix.PipelineCompileOptions(
+        usesMotionBlur        = False,
+        traversableGraphFlags = 
+            optix.TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING,
+        numPayloadValues      = 2,
+        numAttributeValues    = 2,
+        exceptionFlags        = optix.EXCEPTION_FLAG_NONE,
+        pipelineLaunchParamsVariableName = "params"
+        )
 
 
 def create_module( ctx, pipeline_options, hello_ptx ):
     print( "Creating optix module ..." )
+    
+    formats = ['u8', 'u4']
+    itemsize = get_aligned_itemsize( formats, 16 )
+    params_dtype = np.dtype( { 
+        'names'   : ['image', 'image_width' ],
+        'formats' : formats,
+        'itemsize': itemsize,
+        'align'   : True
+        } )
 
-    module_options = optix.ModuleCompileOptions()
-    module_options.maxRegisterCount = optix.COMPILE_DEFAULT_MAX_REGISTER_COUNT  # non-typed constant
-    module_options.optLevel         = optix.COMPILE_OPTIMIZATION_DEFAULT # Typed enum
-    module_options.debugLevel       = optix.COMPILE_DEBUG_LEVEL_LINEINFO
+    bound_value = array.array( 'i', [pix_width] )
+    bound_value_entry = optix.ModuleCompileBoundValueEntry(
+        pipelineParamOffsetInBytes = params_dtype.fields['image_width'][1],
+        boundValue  = bound_value,
+        annotation  = "my_bound_value"
+        )
 
-    log = ""
-    module = ctx.moduleCreateFromPTX(
+
+    module_options = optix.ModuleCompileOptions(
+        maxRegisterCount = optix.COMPILE_DEFAULT_MAX_REGISTER_COUNT,
+        optLevel         = optix.COMPILE_OPTIMIZATION_DEFAULT,
+        boundValues      = [ bound_value_entry ],
+        debugLevel       = optix.COMPILE_DEBUG_LEVEL_LINEINFO
+    )
+
+    module, log = ctx.moduleCreateFromPTX(
             module_options,
             pipeline_options,
-            hello_ptx,
-            log
+            hello_ptx
             )
     print( "\tModule create log: <<<{}>>>".format( log ) )
     return module
@@ -261,17 +284,18 @@ def create_sbt( raygen_prog_group, miss_prog_group ):
 def launch( pipeline, sbt ):
     print( "Launching ... " )
 
-    pix_width  = 512
-    pix_height = 512
     pix_bytes  = pix_width*pix_height*4
     
     h_pix = np.zeros( (pix_width,pix_height,4), 'B' )
     h_pix[0:256, 0:256] = [255, 128, 0, 255]
     d_pix = cp.array( h_pix )
 
+    formats = ['u8', 'u4']
+    itemsize = get_aligned_itemsize( formats, 8 )
     params_dtype = np.dtype( { 
         'names'   : ['image', 'image_width' ],
-        'formats' : ['u8', 'u4'],
+        'formats' : formats,
+        'itemsize': itemsize,
         'align'   : True
         } )
     h_params = np.array( [ ( d_pix.data.ptr, pix_width ) ], dtype=params_dtype )

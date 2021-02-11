@@ -1,6 +1,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 
 #include <optix.h>
 #include <optix_stubs.h>
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <cuda_runtime.h>
@@ -84,22 +86,153 @@ struct PipelineCompileOptions
         const char* pipelineLaunchParamsVariableName_,
         uint32_t  usesPrimitiveTypeFlags
         )
-        {
-            options.usesMotionBlur         = usesMotionBlur;
-            options.traversableGraphFlags  = traversableGraphFlags;
-            options.numPayloadValues       = numPayloadValues;
-            options.numAttributeValues     = numAttributeValues;
-            options.exceptionFlags         = exceptionFlags;
-            options.usesPrimitiveTypeFlags = usesPrimitiveTypeFlags;
-            
-            if( pipelineLaunchParamsVariableName_ )
-                pipelineLaunchParamsVariableName = 
-                    pipelineLaunchParamsVariableName_;
-        }
+    {
+        options.usesMotionBlur         = usesMotionBlur;
+        options.traversableGraphFlags  = traversableGraphFlags;
+        options.numPayloadValues       = numPayloadValues;
+        options.numAttributeValues     = numAttributeValues;
+        options.exceptionFlags         = exceptionFlags;
+        options.usesPrimitiveTypeFlags = usesPrimitiveTypeFlags;
+        
+        if( pipelineLaunchParamsVariableName_ )
+            pipelineLaunchParamsVariableName = 
+                pipelineLaunchParamsVariableName_;
+    }
+
+    void sync()
+    {
+        options.pipelineLaunchParamsVariableName = 
+            pipelineLaunchParamsVariableName.c_str();
+    }
 
     // Strings need extra backing
     std::string pipelineLaunchParamsVariableName;
     OptixPipelineCompileOptions options;
+};
+
+
+struct ModuleCompileBoundValueEntry
+{
+    ModuleCompileBoundValueEntry(
+        size_t pipelineParamOffsetInBytes,
+        const py::buffer& boundValue,
+        const std::string& annotation
+        )
+    {
+        entry.pipelineParamOffsetInBytes = pipelineParamOffsetInBytes;
+        setBoundValue( boundValue );
+        setAnnotation( annotation );
+    }
+    
+    ModuleCompileBoundValueEntry(const ModuleCompileBoundValueEntry& other)
+    {
+        value      = other.value;
+        annotation = other.annotation;
+        entry      = other.entry;
+        /*
+        entry.boundValuePtr = value.data();
+        entry.sizeInBytes   = value.size();
+        */
+
+    }
+    /*
+    ModuleCompileBoundValueEntry& operator=
+        (const ModuleCompileBoundValueEntry&) = delete;
+    ModuleCompileBoundValueEntry&& operator=
+        (ModuleCompileBoundValueEntry&&) = delete;
+    */
+
+    ModuleCompileBoundValueEntry( ModuleCompileBoundValueEntry&& other )
+    {
+        value      = std::move( other.value );
+        annotation = std::move( other.annotation );
+        entry      = other.entry;
+        /*
+        entry.boundValuePtr = value.data();
+        entry.sizeInBytes   = value.size();
+        */
+    }
+
+
+    void setBoundValue( const py::buffer& val )
+    {
+        py::buffer_info binfo = val.request();
+        if( binfo.ndim != 1 )
+            throw std::runtime_error( 
+                "Multi-dimensional array passed as value for "
+                "optix.ModuleCompileBoundValueEntry.boundValue" );
+
+        size_t byte_size = binfo.itemsize * binfo.shape[0];
+        const std::byte* bytes = reinterpret_cast<const std::byte*>(binfo.ptr);
+        value.clear();
+        std::copy( bytes, bytes+byte_size, std::back_inserter( value ) ); 
+
+    }
+
+
+    void setAnnotation( const std::string& val )
+    {
+        annotation = val;
+    }
+    
+
+    void sync()
+    {
+        entry.annotation    = annotation.c_str();
+        entry.sizeInBytes   = value.size();
+        entry.boundValuePtr = value.data();
+    }
+
+
+    OptixModuleCompileBoundValueEntry entry;
+    std::string            annotation;
+    std::vector<std::byte> value;
+};
+
+
+struct ModuleCompileOptions
+{
+    ModuleCompileOptions(
+        int32_t                       maxRegisterCount,
+        OptixCompileOptimizationLevel optLevel,
+        OptixCompileDebugLevel        debugLevel,
+        std::vector<pyoptix::ModuleCompileBoundValueEntry>&& bound_values 
+        ) 
+    {
+        options.maxRegisterCount = maxRegisterCount;
+        options.optLevel         = optLevel;
+        options.debugLevel       = debugLevel;
+
+        setBoundValues( std::move( bound_values ) );
+    }
+
+
+    void setBoundValues( 
+        std::vector<pyoptix::ModuleCompileBoundValueEntry>&& bound_values 
+        )
+    {
+        pyboundValues = std::move( bound_values ); 
+    
+    }
+
+    void sync()
+    {
+        boundValues.clear(); 
+        for( auto& pybve : pyboundValues )
+        {
+            pybve.sync();
+            boundValues.push_back( pybve.entry );
+        }
+
+        options.boundValues    = boundValues.empty() ? 
+                                 nullptr             : 
+                                 boundValues.data();
+        options.numBoundValues = static_cast<uint32_t>( boundValues.size() );
+    }
+
+    OptixModuleCompileOptions options;
+    std::vector<pyoptix::ModuleCompileBoundValueEntry> pyboundValues;
+    std::vector<OptixModuleCompileBoundValueEntry>     boundValues;
 };
 
 
@@ -418,27 +551,26 @@ void pipelineSetStackSize(
     );
 }
  
-pyoptix::Module moduleCreateFromPTX( 
-       pyoptix::DeviceContext            context,
-       OptixModuleCompileOptions*        moduleCompileOptions,
-       pyoptix::PipelineCompileOptions*  pipelineCompileOptions,
-       const std::string&                PTX,
-       std::string&                      logString
+py::tuple moduleCreateFromPTX( 
+       const pyoptix::DeviceContext&          context,
+             pyoptix::ModuleCompileOptions&   moduleCompileOptions,
+             pyoptix::PipelineCompileOptions& pipelineCompileOptions,
+       const std::string&                     PTX
        )
 {
     size_t log_buf_size = LOG_BUFFER_MAX_SIZE;
     char   log_buf[ LOG_BUFFER_MAX_SIZE ];
     log_buf[0] = '\0';
 
-    pyoptix::Module module;
-    pipelineCompileOptions->options.pipelineLaunchParamsVariableName = 
-        pipelineCompileOptions->pipelineLaunchParamsVariableName.c_str();
+    moduleCompileOptions.sync();
+    pipelineCompileOptions.sync();
 
+    pyoptix::Module module;
     PYOPTIX_CHECK( 
         optixModuleCreateFromPTX(
             context.deviceContext,
-            moduleCompileOptions,
-            &pipelineCompileOptions->options,
+            &moduleCompileOptions.options,
+            &pipelineCompileOptions.options,
             PTX.c_str(),
             static_cast<size_t>( PTX.size()+1 ),
             log_buf,
@@ -446,8 +578,7 @@ pyoptix::Module moduleCreateFromPTX(
             &module.module
         )
     );
-    logString = log_buf;
-    return module;
+    return py::make_tuple( module, py::str(log_buf) );
 }
  
 void moduleDestroy( 
@@ -1403,7 +1534,7 @@ PYBIND11_MODULE( optix, m )
         .def_property("logCallbackLevel", 
             [](const pyoptix::DeviceContextOptions& self) 
             { return self.options.logCallbackLevel;}, 
-            [](pyoptix::DeviceContextOptions& self, int val) 
+            [](pyoptix::DeviceContextOptions& self, int32_t val) 
             { self.options.logCallbackLevel = val; }
         )
         .def_property("validationMode", 
@@ -1582,21 +1713,91 @@ PYBIND11_MODULE( optix, m )
         .def_readwrite( "overlapWindowSizeInPixels", &OptixDenoiserSizes::overlapWindowSizeInPixels )
         ;
 
-    py::class_<OptixModuleCompileBoundValueEntry>(m, "ModuleCompileBoundValueEntry")
-        .def( py::init([]() { return std::unique_ptr<OptixModuleCompileBoundValueEntry>(new OptixModuleCompileBoundValueEntry{} ); } ) )
-        .def_readwrite( "pipelineParamOffsetInBytes", &OptixModuleCompileBoundValueEntry::pipelineParamOffsetInBytes )
-        .def_readwrite( "sizeInBytes", &OptixModuleCompileBoundValueEntry::sizeInBytes )
-        .def_readwrite( "boundValuePtr", &OptixModuleCompileBoundValueEntry::boundValuePtr )
-        .def_readwrite( "annotation", &OptixModuleCompileBoundValueEntry::annotation )
+    py::class_<pyoptix::ModuleCompileBoundValueEntry>( 
+            m, "ModuleCompileBoundValueEntry"
+            )
+        .def( 
+            py::init< size_t, py::buffer, const std::string& >(),
+            py::arg( "pipelineParamOffsetInBytes" ) = 0u,
+            py::arg( "boundValue"                 ) = py::bytes(),
+            py::arg( "annotation"                 ) = ""
+            )
+        .def_property( "pipelineParamOffsetInBytes", 
+            [](const pyoptix::ModuleCompileBoundValueEntry& self) 
+            { return self.entry.pipelineParamOffsetInBytes; }, 
+            [](pyoptix::ModuleCompileBoundValueEntry& self, size_t val) 
+            { self.entry.pipelineParamOffsetInBytes = val;  }
+            )
+        .def_property_readonly( "sizeInBytes", 
+            [](const pyoptix::ModuleCompileBoundValueEntry& self) 
+            { return self.entry.sizeInBytes; }
+            )
+        .def_property( "boundValue", 
+            //[](const pyoptix::ModuleCompileBoundValueEntry& self) 
+            //{ return self.boundValue; }, 
+            nullptr,
+            [](pyoptix::ModuleCompileBoundValueEntry& self, py::buffer val) 
+            { self.setBoundValue( val );  }
+            )
+        .def_property( "annotation", 
+            [](const pyoptix::ModuleCompileBoundValueEntry& self) 
+            { return self.annotation; }, 
+            [](pyoptix::ModuleCompileBoundValueEntry& self, 
+               std::string&& val) 
+            { self.setAnnotation( std::move( val ) );  }
+            )
         ;
 
-    py::class_<OptixModuleCompileOptions>(m, "ModuleCompileOptions")
-        .def( py::init([]() { return std::unique_ptr<OptixModuleCompileOptions>(new OptixModuleCompileOptions{} ); } ) )
-        .def_readwrite( "maxRegisterCount", &OptixModuleCompileOptions::maxRegisterCount )
-        .def_readwrite( "optLevel", &OptixModuleCompileOptions::optLevel )
-        .def_readwrite( "debugLevel", &OptixModuleCompileOptions::debugLevel )
-        .def_readwrite( "boundValues", &OptixModuleCompileOptions::boundValues )
-        .def_readwrite( "numBoundValues", &OptixModuleCompileOptions::numBoundValues )
+    py::class_<pyoptix::ModuleCompileOptions>(m, "ModuleCompileOptions")
+        .def( 
+            py::init<
+                int32_t,
+                OptixCompileOptimizationLevel,
+                OptixCompileDebugLevel,
+                std::vector<pyoptix::ModuleCompileBoundValueEntry>&&
+                >(),
+            py::arg( "maxRegisterCount" ) = 0u,
+            py::arg( "optLevel"         ) = OPTIX_COMPILE_OPTIMIZATION_DEFAULT,
+            py::arg( "debugLevel"       ) = OPTIX_COMPILE_DEBUG_LEVEL_DEFAULT,
+            py::arg( "boundValues"      ) = 
+                std::vector<pyoptix::ModuleCompileBoundValueEntry>() 
+            )
+        .def_property( "maxRegisterCount", 
+            [](const pyoptix::ModuleCompileOptions& self) 
+            { return self.options.maxRegisterCount; }, 
+            [](pyoptix::ModuleCompileOptions& self, int32_t val) 
+            { self.options.maxRegisterCount = val;  }
+            )
+        .def_property( "optLevel", 
+            [](const pyoptix::ModuleCompileOptions& self) 
+            { return self.options.optLevel; }, 
+            [](pyoptix::ModuleCompileOptions& self, 
+               OptixCompileOptimizationLevel val) 
+            { self.options.optLevel = val; }
+            )
+        .def_property( "debugLevel", 
+            [](const pyoptix::ModuleCompileOptions& self) 
+            { return self.options.debugLevel; }, 
+            [](pyoptix::ModuleCompileOptions& self, 
+               OptixCompileDebugLevel val) 
+            { self.options.debugLevel = val; }
+            )
+        .def_property( "debugLevel", 
+            [](const pyoptix::ModuleCompileOptions& self) 
+            { return self.options.debugLevel; }, 
+            [](pyoptix::ModuleCompileOptions& self, 
+               OptixCompileDebugLevel val) 
+            { self.options.debugLevel = val; }
+            )
+        .def_property( "boundValues", 
+            // This doesnt do what you probably want it to so disable it
+            //[](const pyoptix::ModuleCompileOptions& self) 
+            //{ return self.boundValues; }, 
+            nullptr,
+            [](pyoptix::ModuleCompileOptions& self, 
+               std::vector<pyoptix::ModuleCompileBoundValueEntry>&& val ) 
+            { self.setBoundValues( std::move( val ) ); }
+            )
         ;
 
     /*
