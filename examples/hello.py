@@ -165,12 +165,14 @@ def create_module( ctx, pipeline_options, hello_ptx ):
 
 def create_program_groups( ctx, module ):
     print( "Creating program groups ... " )
+
     # TODO: optix.ProgramGroup.Options() ?
     program_group_options = optix.ProgramGroupOptions()
 
     # TODO: optix.ProgramGroup.Kind.RAYGEN ?
-    raygen_prog_group_desc  = optix.ProgramGroupDesc()
-    raygen_prog_group_desc.kind                     = optix.PROGRAM_GROUP_KIND_RAYGEN 
+    raygen_prog_group_desc                          = optix.ProgramGroupDesc()
+    raygen_prog_group_desc.kind                     =
+        optix.PROGRAM_GROUP_KIND_RAYGEN 
     raygen_prog_group_desc.raygenModule             = module
     raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__hello"
 

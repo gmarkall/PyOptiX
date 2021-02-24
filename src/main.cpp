@@ -236,6 +236,13 @@ struct ModuleCompileOptions
 };
 
 
+struct BuiltinISOptions
+{
+    //        py::init<OptixPrimitiveType, bool>(),
+    OptixBuiltinISOptions options;
+};
+
+
 struct ProgramGroupDesc
 {
     std::string entryFunctionName0;
@@ -593,19 +600,19 @@ void moduleDestroy(
 }
  
 pyoptix::Module builtinISModuleGet( 
-       pyoptix::DeviceContext            context,
-       OptixModuleCompileOptions*        moduleCompileOptions,
-       pyoptix::PipelineCompileOptions*  pipelineCompileOptions,
-       const OptixBuiltinISOptions*      builtinISOptions
+       const pyoptix::DeviceContext&           context,
+       const pyoptix::ModuleCompileOptions&    moduleCompileOptions,
+       const pyoptix::PipelineCompileOptions&  pipelineCompileOptions,
+       const pyoptix::BuiltinISOptions&        builtinISOptions
     )
 {
     pyoptix::Module module;
     PYOPTIX_CHECK( 
         optixBuiltinISModuleGet(
             context.deviceContext,
-            moduleCompileOptions,
-            &pipelineCompileOptions->options,
-            builtinISOptions,
+            &moduleCompileOptions.options,
+            &pipelineCompileOptions.options,
+            &builtinISOptions.options,
             &module.module
         )
     );
@@ -1988,10 +1995,24 @@ PYBIND11_MODULE( optix, m )
         .def_readwrite( "dssDC", &OptixStackSizes::dssDC )
         ;
 
-    py::class_<OptixBuiltinISOptions>(m, "BuiltinISOptions")
-        .def( py::init([]() { return std::unique_ptr<OptixBuiltinISOptions>(new OptixBuiltinISOptions{} ); } ) )
-        .def_readwrite( "builtinISModuleType", &OptixBuiltinISOptions::builtinISModuleType )
-        .def_readwrite( "usesMotionBlur", &OptixBuiltinISOptions::usesMotionBlur )
+    py::class_<pyoptix::BuiltinISOptions>(m, "BuiltinISOptions")
+        .def(
+            py::init<OptixPrimitiveType, bool>(),
+            py::arg( "builtinISModuleType" ) = OPTIX_PRIMITIVE_TYPE_TRIANGLE,
+            py::arg( "usesMotionBlur" )=false
+            )
+        .def_property( "builtinISModuleType", 
+            [](const pyoptix::BuiltinISOptions& self) 
+            { return self.options.builtinISModuleType; }, 
+            [](pyoptix::BuiltinISOptions& self, OptixPrimitiveType val )
+            { self.options.builtinISModuleType = val; }
+        )
+        .def_property( "usesMotionBlur", 
+            [](const pyoptix::BuiltinISOptions& self) 
+            { return self.options.usesMotionBlur; }, 
+            [](pyoptix::BuiltinISOptions& self, bool val )
+            { self.options.usesMotionBlur = val; }
+        )
         ;
 
 
