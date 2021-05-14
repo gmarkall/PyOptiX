@@ -6,8 +6,8 @@ Python bindings for OptiX 7.
 
 ### OptiX SDK
 
-Install the OptiX 7.2.0 SDK from https://developer.nvidia.com/optix/downloads/7.2.0/linux64
-
+Install the [OptiX 7.2.0
+SDK](https://developer.nvidia.com/optix/downloads/7.2.0/linux64).
 
 
 ### Conda environment
