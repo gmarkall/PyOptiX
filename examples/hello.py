@@ -17,7 +17,7 @@ from numba.core.extending import models, register_model
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
 from numba.cuda import compile_ptx_for_current_device
-from numba.cuda.cudadecl import register, register_attr
+from numba.cuda.cudadecl import register, register_attr, register_global
 from numba.cuda.cudaimpl import lower, lower_attr
 from numba.cuda.types import dim3
 
@@ -120,6 +120,14 @@ class RayGenData_attrs(AttributeTemplate):
         return types.float32
 
 
+class UChar4(types.Type):
+    def __init__(self):
+        super().__init__(name="UChar4")
+
+
+uchar4 = UChar4()
+
+
 @register_model(RayGenData)
 class RayGenDataModel(models.StructModel):
     def __init__(self, dmm, fe_type):
@@ -131,6 +139,18 @@ class RayGenDataModel(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
+@register_model(UChar4)
+class Uchar4Model(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('x', types.uchar),
+            ('y', types.uchar),
+            ('z', types.uchar),
+            ('w', types.uchar),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
 def __raygen_hello():
     launch_index = optix.GetLaunchIndex();
     rtData = optix.GetSbtDataPointer();
@@ -138,18 +158,15 @@ def __raygen_hello():
     f0 = types.float32(0.0)
     f255 = types.float32(255.0)
 
-    # Temp to force referencing struct members through the pipeline
-    max(f0, min(f255, rtData.r * f255)),
-    max(f0, min(f255, rtData.g * f255)),
-    max(f0, min(f255, rtData.b * f255)),
-
     #params.image[launch_index.y * params.image_width + launch_index.x] = \
-    #    make_uchar4(
-    #            max(f0, min(f255, rtData.r * f255)),
-    #            max(f0, min(f255, rtData.g * f255)),
-    #            max(f0, min(f255, rtData.b * f255)),
-    #            255
-    #    )
+    make_uchar4(
+            max(f0, min(f255, rtData.r * f255)),
+            max(f0, min(f255, rtData.g * f255)),
+            max(f0, min(f255, rtData.b * f255)),
+            255
+    )
+
+
 
 
 def _optix_GetLaunchIndex():
@@ -157,6 +174,10 @@ def _optix_GetLaunchIndex():
 
 
 def _optix_GetSbtDataPointer():
+    pass
+
+
+def make_uchar4(x, y, z, w):
     pass
 
 
@@ -174,6 +195,16 @@ class OptixGetLaunchIndex(ConcreteTemplate):
 class OptixGetSbtDataPointer(ConcreteTemplate):
     key = optix.GetSbtDataPointer
     cases = [signature(ray_gen_data)]
+
+
+@register
+class MakeUChar4(ConcreteTemplate):
+    key = make_uchar4
+    cases = [signature(uchar4, types.uchar, types.uchar, types.uchar,
+                       types.uchar)]
+
+
+register_global(make_uchar4, types.Function(MakeUChar4))
 
 
 @register_attr
@@ -223,6 +254,16 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
     rgd.g = builder.load(gptr)
     rgd.b = builder.load(bptr)
     return rgd._getvalue()
+
+
+@lower(make_uchar4, types.uchar, types.uchar, types.uchar, types.uchar)
+def lower_make_uchar4(context, builder, sig, args):
+    uc4 = cgutils.create_struct_proxy(uchar4)(context, builder)
+    uc4.x = args[0]
+    uc4.y = args[1]
+    uc4.z = args[2]
+    uc4.w = args[3]
+    return uc4._getvalue()
 
 
 @lower_attr(ray_gen_data, 'r')
