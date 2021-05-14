@@ -13,11 +13,12 @@ from llvmlite import ir
 
 from numba import types
 from numba.core import cgutils
+from numba.core.extending import models, register_model
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
 from numba.cuda import compile_ptx_for_current_device
 from numba.cuda.cudadecl import register, register_attr
-from numba.cuda.cudaimpl import lower
+from numba.cuda.cudaimpl import lower, lower_attr
 from numba.cuda.types import dim3
 
 
@@ -84,7 +85,7 @@ def compile_cuda( cuda_file ):
         #'-IC:\\ProgramData\\NVIDIA Corporation\OptiX SDK 7.2.0\include',
         #'-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\CUDA\\v11.1\include'
         '-I/usr/local/cuda/include',
-        '-I/home/kmorley/Code/support/NVIDIA-OptiX-SDK-7.2.0-linux64-x86_64/include/'
+        '-I/home/gmarkall/numbadev/NVIDIA-OptiX-SDK-7.2.0-linux64-x86_64/include/'
         ] )
     return ptx
 
@@ -95,12 +96,52 @@ def compile_cuda( cuda_file ):
 #
 #-------------------------------------------------------------------------------
 
+class RayGenDataStruct:
+    pass
+
+class RayGenData(types.Type):
+    def __init__(self):
+        super().__init__(name='RayGenDataType')
+
+ray_gen_data = RayGenData()
+
+
+@register_attr
+class RayGenData_attrs(AttributeTemplate):
+    key = ray_gen_data
+
+    def resolve_r(self, mod):
+        return types.float32
+
+    def resolve_g(self, mod):
+        return types.float32
+
+    def resolve_b(self, mod):
+        return types.float32
+
+
+@register_model(RayGenData)
+class RayGenDataModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('r', types.float32),
+            ('g', types.float32),
+            ('b', types.float32),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
 def __raygen_hello():
     launch_index = optix.GetLaunchIndex();
-    #rtData = optix.GetSbtDataPointer();
+    rtData = optix.GetSbtDataPointer();
 
     f0 = types.float32(0.0)
     f255 = types.float32(255.0)
+
+    # Temp to force referencing struct members through the pipeline
+    max(f0, min(f255, rtData.r * f255)),
+    max(f0, min(f255, rtData.g * f255)),
+    max(f0, min(f255, rtData.b * f255)),
 
     #params.image[launch_index.y * params.image_width + launch_index.x] = \
     #    make_uchar4(
@@ -115,13 +156,24 @@ def _optix_GetLaunchIndex():
     pass
 
 
+def _optix_GetSbtDataPointer():
+    pass
+
+
 optix.GetLaunchIndex = _optix_GetLaunchIndex
+optix.GetSbtDataPointer = _optix_GetSbtDataPointer
 
 
 @register
 class OptixGetLaunchIndex(ConcreteTemplate):
     key = optix.GetLaunchIndex
     cases = [signature(dim3)]
+
+
+@register
+class OptixGetSbtDataPointer(ConcreteTemplate):
+    key = optix.GetSbtDataPointer
+    cases = [signature(ray_gen_data)]
 
 
 @register_attr
@@ -131,10 +183,12 @@ class OptixModuleTemplate(AttributeTemplate):
     def resolve_GetLaunchIndex(self, mod):
         return types.Function(OptixGetLaunchIndex)
 
+    def resolve_GetSbtDataPointer(self, mod):
+        return types.Function(OptixGetSbtDataPointer)
+
 
 @lower(optix.GetLaunchIndex)
 def lower_optix_getLaunchIndex(context, builder, sig, args):
-    # Implement lowering here.
     def get_launch_index(axis):
         asm = ir.InlineAsm(ir.FunctionType(ir.IntType(32), []),
                            f"call ($0), _optix_get_launch_index_{axis}, ();",
@@ -146,6 +200,44 @@ def lower_optix_getLaunchIndex(context, builder, sig, args):
     index.y = get_launch_index('y')
     index.z = get_launch_index('z')
     return index._getvalue()
+
+
+@lower(optix.GetSbtDataPointer)
+def lower_optix_getSbtDataPointer(context, builder, sig, args):
+    asm = ir.InlineAsm(ir.FunctionType(ir.IntType(64), []),
+                       f"call ($0), _optix_get_sbt_data_ptr_64, ();",
+                       "=l", side_effect=True)
+    ptr = builder.call(asm, [])
+    # Note - here we're dereferencing the pointer and loading the values,
+    # for convenience in a PoC. A proper implementation would return the
+    # pointer and the lowering would deal appropriately with it.
+    #breakpoint()
+    ptr = builder.inttoptr(ptr,
+                          context.get_value_type(ray_gen_data).as_pointer())
+                          #ir.PointerType(context.get_value_type(ray_gen_data)))
+    rgd = cgutils.create_struct_proxy(ray_gen_data)(context, builder)
+    rptr = cgutils.gep_inbounds(builder, ptr, 0, 0)
+    gptr = cgutils.gep_inbounds(builder, ptr, 0, 1)
+    bptr = cgutils.gep_inbounds(builder, ptr, 0, 2)
+    rgd.r = builder.load(rptr)
+    rgd.g = builder.load(gptr)
+    rgd.b = builder.load(bptr)
+    return rgd._getvalue()
+
+
+@lower_attr(ray_gen_data, 'r')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 0)
+
+
+@lower_attr(ray_gen_data, 'g')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 1)
+
+
+@lower_attr(ray_gen_data, 'b')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 2)
 
 
 def compile_numba(f, sig=()):
@@ -403,8 +495,12 @@ def launch( pipeline, sbt ):
 
 
 def main():
-    #hello_ptx = compile_cuda( "examples/hello.cu" )
+    cuda_hello_ptx = compile_cuda( "examples/hello.cu" )
+    print(cuda_hello_ptx)
     hello_ptx, resty = compile_numba(__raygen_hello)
+    # Demangle name
+    hello_ptx = hello_ptx.replace('_ZN6cudapy8__main__18__raygen_hello$241E',
+                                  '__raygen_hello')
     print(hello_ptx)
 
     init_optix()
