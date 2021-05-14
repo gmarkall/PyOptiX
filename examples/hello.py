@@ -77,6 +77,26 @@ def compile_cuda( cuda_file ):
         ] )
     return ptx
 
+#-------------------------------------------------------------------------------
+#
+# Hello kernel
+#
+#-------------------------------------------------------------------------------
+
+def __raygen__hello():
+    launch_index = optix.GetLaunchIndex();
+    rtData = optix.GetSbtDataPointer();
+
+    f0 = float32(0.0)
+    f255 = float32(255.0)
+
+    params.image[launch_index.y * params.image_width + launch_index.x] = \
+        make_uchar4(
+                max(f0, min(f255, rtData.r * f255)),
+                max(f0, min(f255, rtData.g * f255)),
+                max(f0, min(f255, rtData.b * f255)),
+                255
+        )
 
 #-------------------------------------------------------------------------------
 #
