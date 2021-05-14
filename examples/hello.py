@@ -171,7 +171,7 @@ def create_program_groups( ctx, module ):
 
     # TODO: optix.ProgramGroup.Kind.RAYGEN ?
     raygen_prog_group_desc                          = optix.ProgramGroupDesc()
-    raygen_prog_group_desc.kind                     =
+    raygen_prog_group_desc.kind                     = \
         optix.PROGRAM_GROUP_KIND_RAYGEN 
     raygen_prog_group_desc.raygenModule             = module
     raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__hello"
