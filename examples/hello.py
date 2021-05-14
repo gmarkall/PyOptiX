@@ -9,6 +9,17 @@ import array
 import ctypes         # C interop helpers
 from PIL import Image # Image IO
 
+from llvmlite import ir
+
+from numba import types
+from numba.core import cgutils
+from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
+                                         signature)
+from numba.cuda import compile_ptx_for_current_device
+from numba.cuda.cudadecl import register, register_attr
+from numba.cuda.cudaimpl import lower
+from numba.cuda.types import dim3
+
 
 #-------------------------------------------------------------------------------
 #
@@ -77,26 +88,69 @@ def compile_cuda( cuda_file ):
         ] )
     return ptx
 
+
 #-------------------------------------------------------------------------------
 #
-# Hello kernel
+# Hello kernel and Numba extensions
 #
 #-------------------------------------------------------------------------------
 
-def __raygen__hello():
+def __raygen_hello():
     launch_index = optix.GetLaunchIndex();
-    rtData = optix.GetSbtDataPointer();
+    #rtData = optix.GetSbtDataPointer();
 
-    f0 = float32(0.0)
-    f255 = float32(255.0)
+    f0 = types.float32(0.0)
+    f255 = types.float32(255.0)
 
-    params.image[launch_index.y * params.image_width + launch_index.x] = \
-        make_uchar4(
-                max(f0, min(f255, rtData.r * f255)),
-                max(f0, min(f255, rtData.g * f255)),
-                max(f0, min(f255, rtData.b * f255)),
-                255
-        )
+    #params.image[launch_index.y * params.image_width + launch_index.x] = \
+    #    make_uchar4(
+    #            max(f0, min(f255, rtData.r * f255)),
+    #            max(f0, min(f255, rtData.g * f255)),
+    #            max(f0, min(f255, rtData.b * f255)),
+    #            255
+    #    )
+
+
+def _optix_GetLaunchIndex():
+    pass
+
+
+optix.GetLaunchIndex = _optix_GetLaunchIndex
+
+
+@register
+class OptixGetLaunchIndex(ConcreteTemplate):
+    key = optix.GetLaunchIndex
+    cases = [signature(dim3)]
+
+
+@register_attr
+class OptixModuleTemplate(AttributeTemplate):
+    key = types.Module(optix)
+
+    def resolve_GetLaunchIndex(self, mod):
+        return types.Function(OptixGetLaunchIndex)
+
+
+@lower(optix.GetLaunchIndex)
+def lower_optix_getLaunchIndex(context, builder, sig, args):
+    # Implement lowering here.
+    def get_launch_index(axis):
+        asm = ir.InlineAsm(ir.FunctionType(ir.IntType(32), []),
+                           f"call ($0), _optix_get_launch_index_{axis}, ();",
+                           "=r", side_effect=True)
+        return builder.call(asm, [])
+
+    index = cgutils.create_struct_proxy(dim3)(context, builder)
+    index.x = get_launch_index('x')
+    index.y = get_launch_index('y')
+    index.z = get_launch_index('z')
+    return index._getvalue()
+
+
+def compile_numba(f, sig=()):
+    return compile_ptx_for_current_device(f, sig)
+
 
 #-------------------------------------------------------------------------------
 #
@@ -349,7 +403,9 @@ def launch( pipeline, sbt ):
 
 
 def main():
-    hello_ptx = compile_cuda( "examples/hello.cu" )
+    #hello_ptx = compile_cuda( "examples/hello.cu" )
+    hello_ptx, resty = compile_numba(__raygen_hello)
+    print(hello_ptx)
 
     init_optix()
 
