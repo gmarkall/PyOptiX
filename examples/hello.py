@@ -205,6 +205,11 @@ def constant_params(context, builder, ty, pyval):
     return builder.load(gvar)
 
 
+@lower_attr(Params, 'image')
+def params_image_width(context, builder, sig, arg):
+    return builder.extract_value(arg, 0)
+
+
 @lower_attr(Params, 'image_width')
 def params_image_width(context, builder, sig, arg):
     return builder.extract_value(arg, 1)
@@ -218,6 +223,8 @@ def __raygen__hello():
     f255 = types.float32(255.0)
 
     idx = launch_index.y * params.image_width + launch_index.x
+
+    params.image
 
     #params.image[idx] =
     make_uchar4(
