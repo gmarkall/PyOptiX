@@ -224,10 +224,7 @@ def __raygen__hello():
 
     idx = launch_index.y * params.image_width + launch_index.x
 
-    params.image
-
-    #params.image[idx] =
-    make_uchar4(
+    params.image[idx] = make_uchar4(
             max(f0, min(f255, rtData.r * f255)),
             max(f0, min(f255, rtData.g * f255)),
             max(f0, min(f255, rtData.b * f255)),
