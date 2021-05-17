@@ -198,10 +198,14 @@ params = ParamsStruct(None, None)
 
 @lower_constant(Params)
 def constant_params(context, builder, ty, pyval):
-    llty = context.get_value_type(ty)
-    gvar = cgutils.add_global_variable(builder.module, llty, 'params')
-    # gvar.linkage
-    gvar.global_constant = True
+    try:
+        gvar = builder.module.get_global('params')
+    except KeyError:
+        llty = context.get_value_type(ty)
+        gvar = cgutils.add_global_variable(builder.module, llty, 'params')
+        gvar.linkage = 'external'
+        gvar.global_constant = True
+
     return builder.load(gvar)
 
 
@@ -605,6 +609,11 @@ def main():
     # Demangle name
     hello_ptx = hello_ptx.replace('_ZN6cudapy8__main__19__raygen__hello$241E',
                                   '__raygen__hello')
+
+    # Hack for global var things
+    hello_ptx = hello_ptx.replace('.extern .global .align 8 .b8 params[16];',
+                                  '.visible .const .align 8 .b8 params[16];')
+    hello_ptx = hello_ptx.replace('ld.global', 'ld.const')
     print(hello_ptx)
 
     init_optix()
