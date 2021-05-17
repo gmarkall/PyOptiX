@@ -13,7 +13,8 @@ from llvmlite import ir
 
 from numba import types
 from numba.core import cgutils
-from numba.core.extending import models, register_model
+from numba.core.extending import models, register_model, typeof_impl
+from numba.core.imputils import lower_constant
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
 from numba.cuda import compile_ptx_for_current_device
@@ -99,6 +100,13 @@ def compile_cuda( cuda_file ):
 class RayGenDataStruct:
     pass
 
+
+class ParamsStruct:
+    def __init__(self, image, image_width):
+        self.image = image
+        self.image_width = image_width
+
+
 class RayGenData(types.Type):
     def __init__(self):
         super().__init__(name='RayGenDataType')
@@ -128,6 +136,25 @@ class UChar4(types.Type):
 uchar4 = UChar4()
 
 
+class Params(types.Type):
+    def __init__(self):
+        super().__init__(name='ParamsType')
+
+
+params_type = Params()
+
+
+@register_attr
+class Params_attrs(AttributeTemplate):
+    key = params_type
+
+    def resolve_image(self, mod):
+        return types.CPointer(uchar4)
+
+    def resolve_image_width(self, mod):
+        return types.uint32
+
+
 @register_model(RayGenData)
 class RayGenDataModel(models.StructModel):
     def __init__(self, dmm, fe_type):
@@ -151,6 +178,38 @@ class Uchar4Model(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
+@register_model(Params)
+class ParamsModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('image', types.CPointer(uchar4)),
+            ('image_width', types.uint32)
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+@typeof_impl.register(ParamsStruct)
+def typeof_params(val, c):
+    return params_type
+
+
+params = ParamsStruct(None, None)
+
+
+@lower_constant(Params)
+def constant_params(context, builder, ty, pyval):
+    llty = context.get_value_type(ty)
+    gvar = cgutils.add_global_variable(builder.module, llty, 'params')
+    # gvar.linkage
+    gvar.global_constant = True
+    return builder.load(gvar)
+
+
+@lower_attr(Params, 'image_width')
+def params_image_width(context, builder, sig, arg):
+    return builder.extract_value(arg, 1)
+
+
 def __raygen__hello():
     launch_index = optix.GetLaunchIndex();
     rtData = optix.GetSbtDataPointer();
@@ -158,7 +217,9 @@ def __raygen__hello():
     f0 = types.float32(0.0)
     f255 = types.float32(255.0)
 
-    #params.image[launch_index.y * params.image_width + launch_index.x] = \
+    idx = launch_index.y * params.image_width + launch_index.x
+
+    #params.image[idx] =
     make_uchar4(
             max(f0, min(f255, rtData.r * f255)),
             max(f0, min(f255, rtData.g * f255)),
