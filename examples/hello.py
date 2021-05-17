@@ -286,7 +286,7 @@ def lower_optix_getLaunchIndex(context, builder, sig, args):
     def get_launch_index(axis):
         asm = ir.InlineAsm(ir.FunctionType(ir.IntType(32), []),
                            f"call ($0), _optix_get_launch_index_{axis}, ();",
-                           "=r", side_effect=True)
+                           "=r")
         return builder.call(asm, [])
 
     index = cgutils.create_struct_proxy(dim3)(context, builder)
@@ -300,7 +300,7 @@ def lower_optix_getLaunchIndex(context, builder, sig, args):
 def lower_optix_getSbtDataPointer(context, builder, sig, args):
     asm = ir.InlineAsm(ir.FunctionType(ir.IntType(64), []),
                        f"call ($0), _optix_get_sbt_data_ptr_64, ();",
-                       "=l", side_effect=True)
+                       "=l")
     ptr = builder.call(asm, [])
     # Note - here we're dereferencing the pointer and loading the values,
     # for convenience in a PoC. A proper implementation would return the
