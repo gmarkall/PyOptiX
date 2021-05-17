@@ -151,7 +151,7 @@ class Uchar4Model(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
-def __raygen_hello():
+def __raygen__hello():
     launch_index = optix.GetLaunchIndex();
     rtData = optix.GetSbtDataPointer();
 
@@ -165,8 +165,6 @@ def __raygen_hello():
             max(f0, min(f255, rtData.b * f255)),
             255
     )
-
-
 
 
 def _optix_GetLaunchIndex():
@@ -538,10 +536,10 @@ def launch( pipeline, sbt ):
 def main():
     cuda_hello_ptx = compile_cuda( "examples/hello.cu" )
     print(cuda_hello_ptx)
-    hello_ptx, resty = compile_numba(__raygen_hello)
+    hello_ptx, resty = compile_numba(__raygen__hello)
     # Demangle name
-    hello_ptx = hello_ptx.replace('_ZN6cudapy8__main__18__raygen_hello$241E',
-                                  '__raygen_hello')
+    hello_ptx = hello_ptx.replace('_ZN6cudapy8__main__19__raygen__hello$241E',
+                                  '__raygen__hello')
     print(hello_ptx)
 
     init_optix()
