@@ -70,11 +70,12 @@ class TestModule:
         ctx.destroy()
 
 
-    def test_builtin_is_module_get():
+    def test_builtin_is_module_get( self ):
         ctx = tutil.create_default_ctx();
         module_opts     = optix.ModuleCompileOptions()
         pipeline_opts   = optix.PipelineCompileOptions()
         builtin_is_opts = optix.BuiltinISOptions()
+        builtin_is_opts.builtinISModuleType = optix.PRIMITIVE_TYPE_TRIANGLE
 
         is_mod = ctx.builtinISModuleGet(
                 module_opts,

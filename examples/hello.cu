@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,23 +27,40 @@
 //
 
 #include <optix.h>
-#include "hello.h"
+
+#include "optixHello.h"
+#include <cuda/helpers.h>
 
 extern "C" {
 __constant__ Params params;
 }
 
-
 extern "C"
-__global__ void __raygen__hello()
+__global__ void __raygen__draw_solid_color()
 {
     uint3 launch_index = optixGetLaunchIndex();
     RayGenData* rtData = (RayGenData*)optixGetSbtDataPointer();
     params.image[launch_index.y * params.image_width + launch_index.x] =
-        make_uchar4( 
-                max( 0.0f, min( 255.0f, rtData->r*255.0f ) ), 
-                max( 0.0f, min( 255.0f, rtData->g*255.0f ) ),
-                max( 0.0f, min( 255.0f, rtData->b*255.0f ) ),
-                255
-                );
+        make_color( make_float3( rtData->r, rtData->g, rtData->b ) );
 }
+
+extern "C"
+__global__ void __anyhit__noop() {}
+
+extern "C"
+__global__ void __closesthit__noop() {}
+
+extern "C"
+__global__ void ___intersection__noop() {}
+
+extern "C"
+__global__ void ___intersect__noop() {}
+
+extern "C"
+__global__ void ___miss__noop() {}
+
+extern "C"
+__global__ void ___direct_callable__noop() {}
+
+extern "C"
+__global__ void ___continuation_callable__noop() {}
