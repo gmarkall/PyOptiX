@@ -17,7 +17,8 @@ from numba.core.extending import models, register_model, typeof_impl
 from numba.core.imputils import lower_constant
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
-from numba.cuda import compile_ptx_for_current_device
+from numba.cuda import get_current_device
+from numba.cuda.compiler import compile_cuda as numba_compile_cuda
 from numba.cuda.cudadrv import nvvm
 from numba.cuda.cudadecl import register, register_attr, register_global
 from numba.cuda.cudaimpl import lower, lower_attr
@@ -421,8 +422,32 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
 # An equivalent to the compile_cuda function for Python kernels. The types of
 # the arguments to the kernel must be provided, if there are any.
 
-def compile_numba(f, sig=()):
-    return compile_ptx_for_current_device(f, sig)
+def compile_numba(f, sig=(), debug=False):
+    # Based on numba.cuda.compile_ptx. We don't just use
+    # compile_ptx_for_current_device because it generates a kernel with a
+    # mangled name. For proceeding beyond this prototype, an option should be
+    # added to compile_ptx in Numba to not mangle the function name.
+
+    nvvm_options = {
+        'debug': debug,
+        'fastmath': False,
+        'opt': 0 if debug else 3,
+    }
+
+    cres = numba_compile_cuda(f, None, sig, debug=debug,
+                              nvvm_options=nvvm_options)
+    fname = cres.fndesc.llvm_func_name
+    tgt = cres.target_context
+    lib, kernel = tgt.prepare_cuda_kernel(cres.library, fname,
+                                          cres.signature.args, debug,
+                                          nvvm_options)
+    cc = get_current_device().compute_capability
+    ptx = lib.get_asm_str(cc=cc)
+
+    # Demangle name
+    mangled_name = kernel.name
+    original_name = cres.library.name
+    return ptx.replace(mangled_name, original_name)
 
 
 #-------------------------------------------------------------------------------
@@ -676,10 +701,7 @@ def launch( pipeline, sbt ):
 
 
 def main():
-    hello_ptx, resty = compile_numba(__raygen__hello)
-    # Demangle name
-    hello_ptx = hello_ptx.replace('_ZN6cudapy8__main__19__raygen__hello$241E',
-                                  '__raygen__hello')
+    hello_ptx = compile_numba(__raygen__hello)
 
     init_optix()
 
