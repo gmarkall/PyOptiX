@@ -96,182 +96,9 @@ def compile_cuda( cuda_file ):
 
 #-------------------------------------------------------------------------------
 #
-# User code / kernel
+# Numba extensions for general CUDA / OptiX support
 #
 #-------------------------------------------------------------------------------
-
-# Structures as declared in hello.h
-
-class RayGenDataStruct:
-    fields = (
-        ('r', 'float'),
-        ('g', 'float'),
-        ('b', 'float'),
-    )
-
-
-class ParamsStruct:
-    fields = (
-        ('image', 'uchar4*'),
-        ('image_width', 'unsigned int'),
-    )
-
-
-# "Declare" a global called params
-
-params = ParamsStruct()
-
-
-# A kernel equivalent to that declared in hello.cu
-
-def __raygen__hello():
-    launch_index = optix.GetLaunchIndex()
-    rtData = RayGenDataStruct(optix.GetSbtDataPointer())
-
-    f0 = types.float32(0.0)
-    f255 = types.float32(255.0)
-
-    idx = launch_index.y * params.image_width + launch_index.x
-
-    params.image[idx] = make_uchar4(
-            max(f0, min(f255, rtData.r * types.float32(launch_index.x))),
-            max(f0, min(f255, rtData.g * types.float32(launch_index.y))),
-            max(f0, min(f255, rtData.b * f255)),
-            255
-    )
-
-
-#-------------------------------------------------------------------------------
-#
-# Numba extensions
-#
-#-------------------------------------------------------------------------------
-
-
-# RayGenDataStruct
-# ----------------
-
-# RayGenDataStruct typing
-
-class RayGenData(types.Type):
-    def __init__(self):
-        super().__init__(name='RayGenDataType')
-
-
-ray_gen_data = RayGenData()
-
-
-@register_attr
-class RayGenData_attrs(AttributeTemplate):
-    key = ray_gen_data
-
-    def resolve_r(self, mod):
-        return types.float32
-
-    def resolve_g(self, mod):
-        return types.float32
-
-    def resolve_b(self, mod):
-        return types.float32
-
-
-# RayGenDataStruct data model - couples Numba / Python typing with LLVM /
-# low-level types
-
-@register_model(RayGenData)
-class RayGenDataModel(models.StructModel):
-    def __init__(self, dmm, fe_type):
-        members = [
-            ('r', types.float32),
-            ('g', types.float32),
-            ('b', types.float32),
-        ]
-        super().__init__(dmm, fe_type, members)
-
-
-# RayGenDataStruct lowering - generates LLVM IR code for operations on
-# RayGenDataStructs.
-
-@lower_attr(ray_gen_data, 'r')
-def ray_gen_data_r(context, builder, sig, args):
-    return builder.extract_value(args, 0)
-
-
-@lower_attr(ray_gen_data, 'g')
-def ray_gen_data_r(context, builder, sig, args):
-    return builder.extract_value(args, 1)
-
-
-@lower_attr(ray_gen_data, 'b')
-def ray_gen_data_r(context, builder, sig, args):
-    return builder.extract_value(args, 2)
-
-
-# ParamsStruct
-# ------------
-
-# ParamsStruct typing
-
-class Params(types.Type):
-    def __init__(self):
-        super().__init__(name='ParamsType')
-
-
-params_type = Params()
-
-
-@register_attr
-class Params_attrs(AttributeTemplate):
-    key = params_type
-
-    def resolve_image(self, mod):
-        return types.CPointer(uchar4)
-
-    def resolve_image_width(self, mod):
-        return types.uint32
-
-@typeof_impl.register(ParamsStruct)
-def typeof_params(val, c):
-    return params_type
-
-
-# ParamsStruct data model
-
-@register_model(Params)
-class ParamsModel(models.StructModel):
-    def __init__(self, dmm, fe_type):
-        members = [
-            ('image', types.CPointer(uchar4)),
-            ('image_width', types.uint32)
-        ]
-        super().__init__(dmm, fe_type, members)
-
-
-# ParamsStruct lowering
-
-@lower_constant(Params)
-def constant_params(context, builder, ty, pyval):
-    try:
-        gvar = builder.module.get_global('params')
-    except KeyError:
-        llty = context.get_value_type(ty)
-        gvar = cgutils.add_global_variable(builder.module, llty, 'params',
-                                          addrspace=nvvm.ADDRSPACE_CONSTANT)
-        gvar.linkage = 'external'
-        gvar.global_constant = True
-
-    return builder.load(gvar)
-
-
-@lower_attr(Params, 'image')
-def params_image_width(context, builder, sig, arg):
-    return builder.extract_value(arg, 0)
-
-
-@lower_attr(Params, 'image_width')
-def params_image_width(context, builder, sig, arg):
-    return builder.extract_value(arg, 1)
-
 
 # UChar4
 # ------
@@ -338,7 +165,6 @@ def lower_make_uchar4(context, builder, sig, args):
 # Typing for OptiX types
 
 class SbtDataPointer(types.RawPointer):
-    """A pointer that will cast to a pointer to any other type"""
     def __init__(self):
         super().__init__(name="SbtDataPointer")
 
@@ -351,15 +177,6 @@ sbt_data_pointer = SbtDataPointer()
 @register_model(SbtDataPointer)
 class SbtDataPointerModel(models.OpaqueModel):
     pass
-
-
-@type_callable(RayGenDataStruct)
-def type_ray_gen_data_struct(context):
-    def typer(sbt_data_pointer):
-        if isinstance(sbt_data_pointer, SbtDataPointer):
-            return ray_gen_data
-
-    return typer
 
 
 # OptiX functions
@@ -436,21 +253,6 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
     return ptr
 
 
-@lower_builtin(RayGenDataStruct, SbtDataPointer)
-def impl_ray_gen_data_struct(context, builder, sig, args):
-    ptr = args[0]
-    ptr = builder.bitcast(ptr,
-                          context.get_value_type(ray_gen_data).as_pointer())
-    rgd = cgutils.create_struct_proxy(ray_gen_data)(context, builder)
-    rptr = cgutils.gep_inbounds(builder, ptr, 0, 0)
-    gptr = cgutils.gep_inbounds(builder, ptr, 0, 1)
-    bptr = cgutils.gep_inbounds(builder, ptr, 0, 2)
-    rgd.r = builder.load(rptr)
-    rgd.g = builder.load(gptr)
-    rgd.b = builder.load(bptr)
-    return rgd._getvalue()
-
-
 # Numba compilation
 # -----------------
 
@@ -483,6 +285,217 @@ def compile_numba(f, sig=(), debug=False):
     mangled_name = kernel.name
     original_name = cres.library.name
     return ptx.replace(mangled_name, original_name)
+
+
+
+
+#-------------------------------------------------------------------------------
+#
+# User code / kernel - the following section is what we'd expect a user of
+# PyOptiX to write.
+#
+#-------------------------------------------------------------------------------
+
+# Structures as declared in hello.h
+
+class RayGenDataStruct:
+    fields = (
+        ('r', 'float'),
+        ('g', 'float'),
+        ('b', 'float'),
+    )
+
+
+class ParamsStruct:
+    fields = (
+        ('image', 'uchar4*'),
+        ('image_width', 'unsigned int'),
+    )
+
+
+# "Declare" a global called params
+
+params = ParamsStruct()
+
+
+# A kernel similar to that declared in hello.cu - the pixel value calculation is
+# a little different to make the output more interesting, and to demonstrate
+# how modifying the Python code modifies the output.
+
+def __raygen__hello():
+    launch_index = optix.GetLaunchIndex()
+    rtData = RayGenDataStruct(optix.GetSbtDataPointer())
+
+    f0 = types.float32(0.0)
+    f255 = types.float32(255.0)
+
+    idx = launch_index.y * params.image_width + launch_index.x
+
+    params.image[idx] = make_uchar4(
+            max(f0, min(f255, rtData.r * types.float32(launch_index.x))),
+            max(f0, min(f255, rtData.g * types.float32(launch_index.y))),
+            max(f0, min(f255, rtData.b * f255)),
+            255
+    )
+
+
+#-------------------------------------------------------------------------------
+#
+# Generated Numba extensions - the following are defined manually for this
+# prototype, but the expectation is that all the code in this section would be
+# autogenerated based on the user's data structures and kernel above.
+#
+#-------------------------------------------------------------------------------
+
+
+# RayGenDataStruct
+# ----------------
+
+# RayGenDataStruct typing
+
+class RayGenData(types.Type):
+    def __init__(self):
+        super().__init__(name='RayGenDataType')
+
+
+ray_gen_data = RayGenData()
+
+
+@register_attr
+class RayGenData_attrs(AttributeTemplate):
+    key = ray_gen_data
+
+    def resolve_r(self, mod):
+        return types.float32
+
+    def resolve_g(self, mod):
+        return types.float32
+
+    def resolve_b(self, mod):
+        return types.float32
+
+
+@type_callable(RayGenDataStruct)
+def type_ray_gen_data_struct(context):
+    def typer(sbt_data_pointer):
+        if isinstance(sbt_data_pointer, SbtDataPointer):
+            return ray_gen_data
+
+    return typer
+
+
+# RayGenDataStruct data model - couples Numba / Python typing with LLVM /
+# low-level types
+
+@register_model(RayGenData)
+class RayGenDataModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('r', types.float32),
+            ('g', types.float32),
+            ('b', types.float32),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+# RayGenDataStruct lowering - generates LLVM IR code for operations on
+# RayGenDataStructs.
+
+@lower_attr(ray_gen_data, 'r')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 0)
+
+
+@lower_attr(ray_gen_data, 'g')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 1)
+
+
+@lower_attr(ray_gen_data, 'b')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 2)
+
+
+@lower_builtin(RayGenDataStruct, SbtDataPointer)
+def impl_ray_gen_data_struct(context, builder, sig, args):
+    ptr = args[0]
+    ptr = builder.bitcast(ptr,
+                          context.get_value_type(ray_gen_data).as_pointer())
+    rgd = cgutils.create_struct_proxy(ray_gen_data)(context, builder)
+    rptr = cgutils.gep_inbounds(builder, ptr, 0, 0)
+    gptr = cgutils.gep_inbounds(builder, ptr, 0, 1)
+    bptr = cgutils.gep_inbounds(builder, ptr, 0, 2)
+    rgd.r = builder.load(rptr)
+    rgd.g = builder.load(gptr)
+    rgd.b = builder.load(bptr)
+    return rgd._getvalue()
+
+
+# ParamsStruct
+# ------------
+
+# ParamsStruct typing
+
+class Params(types.Type):
+    def __init__(self):
+        super().__init__(name='ParamsType')
+
+
+params_type = Params()
+
+
+@register_attr
+class Params_attrs(AttributeTemplate):
+    key = params_type
+
+    def resolve_image(self, mod):
+        return types.CPointer(uchar4)
+
+    def resolve_image_width(self, mod):
+        return types.uint32
+
+
+@typeof_impl.register(ParamsStruct)
+def typeof_params(val, c):
+    return params_type
+
+
+# ParamsStruct data model
+
+@register_model(Params)
+class ParamsModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('image', types.CPointer(uchar4)),
+            ('image_width', types.uint32)
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+# ParamsStruct lowering
+
+@lower_constant(Params)
+def constant_params(context, builder, ty, pyval):
+    try:
+        gvar = builder.module.get_global('params')
+    except KeyError:
+        llty = context.get_value_type(ty)
+        gvar = cgutils.add_global_variable(builder.module, llty, 'params',
+                                          addrspace=nvvm.ADDRSPACE_CONSTANT)
+        gvar.linkage = 'external'
+        gvar.global_constant = True
+
+    return builder.load(gvar)
+
+
+@lower_attr(Params, 'image')
+def params_image_width(context, builder, sig, arg):
+    return builder.extract_value(arg, 0)
+
+
+@lower_attr(Params, 'image_width')
+def params_image_width(context, builder, sig, arg):
+    return builder.extract_value(arg, 1)
 
 
 #-------------------------------------------------------------------------------
