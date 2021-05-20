@@ -93,12 +93,17 @@ def compile_cuda( cuda_file ):
 
 #-------------------------------------------------------------------------------
 #
-# Hello kernel and Numba extensions
+# User code / kernel
 #
 #-------------------------------------------------------------------------------
 
+# Structures as declared in hello.h
+
 class RayGenDataStruct:
-    pass
+    def __init__(self, r, g, b):
+        self.r = r
+        self.g = g
+        self.b = b
 
 
 class ParamsStruct:
@@ -107,9 +112,46 @@ class ParamsStruct:
         self.image_width = image_width
 
 
+# "Declare" a global called params
+
+params = ParamsStruct(None, None)
+
+
+# A kernel equivalent to that declared in hello.cu
+
+def __raygen__hello():
+    launch_index = optix.GetLaunchIndex();
+    rtData = optix.GetSbtDataPointer();
+
+    f0 = types.float32(0.0)
+    f255 = types.float32(255.0)
+
+    idx = launch_index.y * params.image_width + launch_index.x
+
+    params.image[idx] = make_uchar4(
+            max(f0, min(f255, rtData.r * f255)),
+            max(f0, min(f255, rtData.g * f255)),
+            max(f0, min(f255, rtData.b * f255)),
+            255
+    )
+
+
+#-------------------------------------------------------------------------------
+#
+# Numba extensions
+#
+#-------------------------------------------------------------------------------
+
+
+# RayGenDataStruct
+# ----------------
+
+# RayGenDataStruct typing
+
 class RayGenData(types.Type):
     def __init__(self):
         super().__init__(name='RayGenDataType')
+
 
 ray_gen_data = RayGenData()
 
@@ -128,13 +170,42 @@ class RayGenData_attrs(AttributeTemplate):
         return types.float32
 
 
-class UChar4(types.Type):
-    def __init__(self):
-        super().__init__(name="UChar4")
+# RayGenDataStruct data model - couples Numba / Python typing with LLVM /
+# low-level types
+
+@register_model(RayGenData)
+class RayGenDataModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('r', types.float32),
+            ('g', types.float32),
+            ('b', types.float32),
+        ]
+        super().__init__(dmm, fe_type, members)
 
 
-uchar4 = UChar4()
+# RayGenDataStruct lowering - generates LLVM IR code for operations on
+# RayGenDataStructs.
 
+@lower_attr(ray_gen_data, 'r')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 0)
+
+
+@lower_attr(ray_gen_data, 'g')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 1)
+
+
+@lower_attr(ray_gen_data, 'b')
+def ray_gen_data_r(context, builder, sig, args):
+    return builder.extract_value(args, 2)
+
+
+# ParamsStruct
+# ------------
+
+# ParamsStruct typing
 
 class Params(types.Type):
     def __init__(self):
@@ -154,29 +225,12 @@ class Params_attrs(AttributeTemplate):
     def resolve_image_width(self, mod):
         return types.uint32
 
-
-@register_model(RayGenData)
-class RayGenDataModel(models.StructModel):
-    def __init__(self, dmm, fe_type):
-        members = [
-            ('r', types.float32),
-            ('g', types.float32),
-            ('b', types.float32),
-        ]
-        super().__init__(dmm, fe_type, members)
+@typeof_impl.register(ParamsStruct)
+def typeof_params(val, c):
+    return params_type
 
 
-@register_model(UChar4)
-class Uchar4Model(models.StructModel):
-    def __init__(self, dmm, fe_type):
-        members = [
-            ('x', types.uchar),
-            ('y', types.uchar),
-            ('z', types.uchar),
-            ('w', types.uchar),
-        ]
-        super().__init__(dmm, fe_type, members)
-
+# ParamsStruct data model
 
 @register_model(Params)
 class ParamsModel(models.StructModel):
@@ -188,13 +242,7 @@ class ParamsModel(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
-@typeof_impl.register(ParamsStruct)
-def typeof_params(val, c):
-    return params_type
-
-
-params = ParamsStruct(None, None)
-
+# ParamsStruct lowering
 
 @lower_constant(Params)
 def constant_params(context, builder, ty, pyval):
@@ -219,22 +267,70 @@ def params_image_width(context, builder, sig, arg):
     return builder.extract_value(arg, 1)
 
 
-def __raygen__hello():
-    launch_index = optix.GetLaunchIndex();
-    rtData = optix.GetSbtDataPointer();
+# UChar4
+# ------
 
-    f0 = types.float32(0.0)
-    f255 = types.float32(255.0)
+# Numba presently doesn't implement the UChar4 type (which is fairly standard
+# CUDA) so we provide some minimal support for it here.
 
-    idx = launch_index.y * params.image_width + launch_index.x
 
-    params.image[idx] = make_uchar4(
-            max(f0, min(f255, rtData.r * f255)),
-            max(f0, min(f255, rtData.g * f255)),
-            max(f0, min(f255, rtData.b * f255)),
-            255
-    )
+# Prototype a function to construct a uchar4
 
+def make_uchar4(x, y, z, w):
+    pass
+
+
+# UChar4 typing
+
+class UChar4(types.Type):
+    def __init__(self):
+        super().__init__(name="UChar4")
+
+
+uchar4 = UChar4()
+
+
+@register
+class MakeUChar4(ConcreteTemplate):
+    key = make_uchar4
+    cases = [signature(uchar4, types.uchar, types.uchar, types.uchar,
+                       types.uchar)]
+
+
+register_global(make_uchar4, types.Function(MakeUChar4))
+
+
+# UChar4 data model
+
+@register_model(UChar4)
+class Uchar4Model(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('x', types.uchar),
+            ('y', types.uchar),
+            ('z', types.uchar),
+            ('w', types.uchar),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+# UChar4 lowering
+
+@lower(make_uchar4, types.uchar, types.uchar, types.uchar, types.uchar)
+def lower_make_uchar4(context, builder, sig, args):
+    uc4 = cgutils.create_struct_proxy(uchar4)(context, builder)
+    uc4.x = args[0]
+    uc4.y = args[1]
+    uc4.z = args[2]
+    uc4.w = args[3]
+    return uc4._getvalue()
+
+
+# OptiX functions
+# ---------------
+
+# Here we "prototype" the OptiX functions that the user will call in their
+# kernels, so that Numba has something to refer to when compiling the kernel.
 
 def _optix_GetLaunchIndex():
     pass
@@ -244,13 +340,15 @@ def _optix_GetSbtDataPointer():
     pass
 
 
-def make_uchar4(x, y, z, w):
-    pass
-
+# Monkey-patch the functions into the optix module, so the user can write
+# optix.GetLaunchIndex etc., for symmetry with the rest of the API implemented
+# in PyOptiX.
 
 optix.GetLaunchIndex = _optix_GetLaunchIndex
 optix.GetSbtDataPointer = _optix_GetSbtDataPointer
 
+
+# OptiX function typing
 
 @register
 class OptixGetLaunchIndex(ConcreteTemplate):
@@ -264,16 +362,6 @@ class OptixGetSbtDataPointer(ConcreteTemplate):
     cases = [signature(ray_gen_data)]
 
 
-@register
-class MakeUChar4(ConcreteTemplate):
-    key = make_uchar4
-    cases = [signature(uchar4, types.uchar, types.uchar, types.uchar,
-                       types.uchar)]
-
-
-register_global(make_uchar4, types.Function(MakeUChar4))
-
-
 @register_attr
 class OptixModuleTemplate(AttributeTemplate):
     key = types.Module(optix)
@@ -284,6 +372,8 @@ class OptixModuleTemplate(AttributeTemplate):
     def resolve_GetSbtDataPointer(self, mod):
         return types.Function(OptixGetSbtDataPointer)
 
+
+# OptiX function lowering
 
 @lower(optix.GetLaunchIndex)
 def lower_optix_getLaunchIndex(context, builder, sig, args):
@@ -323,30 +413,11 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
     return rgd._getvalue()
 
 
-@lower(make_uchar4, types.uchar, types.uchar, types.uchar, types.uchar)
-def lower_make_uchar4(context, builder, sig, args):
-    uc4 = cgutils.create_struct_proxy(uchar4)(context, builder)
-    uc4.x = args[0]
-    uc4.y = args[1]
-    uc4.z = args[2]
-    uc4.w = args[3]
-    return uc4._getvalue()
+# Numba compilation
+# -----------------
 
-
-@lower_attr(ray_gen_data, 'r')
-def ray_gen_data_r(context, builder, sig, args):
-    return builder.extract_value(args, 0)
-
-
-@lower_attr(ray_gen_data, 'g')
-def ray_gen_data_r(context, builder, sig, args):
-    return builder.extract_value(args, 1)
-
-
-@lower_attr(ray_gen_data, 'b')
-def ray_gen_data_r(context, builder, sig, args):
-    return builder.extract_value(args, 2)
-
+# An equivalent to the compile_cuda function for Python kernels. The types of
+# the arguments to the kernel must be provided, if there are any.
 
 def compile_numba(f, sig=()):
     return compile_ptx_for_current_device(f, sig)
@@ -603,8 +674,6 @@ def launch( pipeline, sbt ):
 
 
 def main():
-    cuda_hello_ptx = compile_cuda( "examples/hello.cu" )
-    print(cuda_hello_ptx)
     hello_ptx, resty = compile_numba(__raygen__hello)
     # Demangle name
     hello_ptx = hello_ptx.replace('_ZN6cudapy8__main__19__raygen__hello$241E',
@@ -614,7 +683,6 @@ def main():
     hello_ptx = hello_ptx.replace('.extern .global .align 8 .b8 params[16];',
                                   '.visible .const .align 8 .b8 params[16];')
     hello_ptx = hello_ptx.replace('ld.global', 'ld.const')
-    print(hello_ptx)
 
     init_optix()
 
