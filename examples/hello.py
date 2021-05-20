@@ -13,7 +13,8 @@ from llvmlite import ir
 
 from numba import types
 from numba.core import cgutils
-from numba.core.extending import models, register_model, typeof_impl
+from numba.core.extending import (models, register_model, typeof_impl,
+                                  type_callable, lower_builtin)
 from numba.core.imputils import lower_constant
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
@@ -102,28 +103,30 @@ def compile_cuda( cuda_file ):
 # Structures as declared in hello.h
 
 class RayGenDataStruct:
-    def __init__(self, r, g, b):
-        self.r = r
-        self.g = g
-        self.b = b
+    fields = (
+        ('r', 'float'),
+        ('g', 'float'),
+        ('b', 'float'),
+    )
 
 
 class ParamsStruct:
-    def __init__(self, image, image_width):
-        self.image = image
-        self.image_width = image_width
+    fields = (
+        ('image', 'uchar4*'),
+        ('image_width', 'unsigned int'),
+    )
 
 
 # "Declare" a global called params
 
-params = ParamsStruct(None, None)
+params = ParamsStruct()
 
 
 # A kernel equivalent to that declared in hello.cu
 
 def __raygen__hello():
-    launch_index = optix.GetLaunchIndex();
-    rtData = optix.GetSbtDataPointer();
+    launch_index = optix.GetLaunchIndex()
+    rtData = RayGenDataStruct(optix.GetSbtDataPointer())
 
     f0 = types.float32(0.0)
     f255 = types.float32(255.0)
@@ -131,8 +134,8 @@ def __raygen__hello():
     idx = launch_index.y * params.image_width + launch_index.x
 
     params.image[idx] = make_uchar4(
-            max(f0, min(f255, rtData.r * f255)),
-            max(f0, min(f255, rtData.g * f255)),
+            max(f0, min(f255, rtData.r * types.float32(launch_index.x))),
+            max(f0, min(f255, rtData.g * types.float32(launch_index.y))),
             max(f0, min(f255, rtData.b * f255)),
             255
     )
@@ -329,6 +332,36 @@ def lower_make_uchar4(context, builder, sig, args):
     return uc4._getvalue()
 
 
+# OptiX types
+# -----------
+
+# Typing for OptiX types
+
+class SbtDataPointer(types.RawPointer):
+    """A pointer that will cast to a pointer to any other type"""
+    def __init__(self):
+        super().__init__(name="SbtDataPointer")
+
+
+sbt_data_pointer = SbtDataPointer()
+
+
+# Models for OptiX types
+
+@register_model(SbtDataPointer)
+class SbtDataPointerModel(models.OpaqueModel):
+    pass
+
+
+@type_callable(RayGenDataStruct)
+def type_ray_gen_data_struct(context):
+    def typer(sbt_data_pointer):
+        if isinstance(sbt_data_pointer, SbtDataPointer):
+            return ray_gen_data
+
+    return typer
+
+
 # OptiX functions
 # ---------------
 
@@ -362,7 +395,7 @@ class OptixGetLaunchIndex(ConcreteTemplate):
 @register
 class OptixGetSbtDataPointer(ConcreteTemplate):
     key = optix.GetSbtDataPointer
-    cases = [signature(ray_gen_data)]
+    cases = [signature(sbt_data_pointer)]
 
 
 @register_attr
@@ -399,13 +432,15 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
                        f"call ($0), _optix_get_sbt_data_ptr_64, ();",
                        "=l")
     ptr = builder.call(asm, [])
-    # Note - here we're dereferencing the pointer and loading the values,
-    # for convenience in a PoC. A proper implementation would return the
-    # pointer and the lowering would deal appropriately with it.
-    #breakpoint()
-    ptr = builder.inttoptr(ptr,
+    ptr = builder.inttoptr(ptr, ir.IntType(8).as_pointer())
+    return ptr
+
+
+@lower_builtin(RayGenDataStruct, SbtDataPointer)
+def impl_ray_gen_data_struct(context, builder, sig, args):
+    ptr = args[0]
+    ptr = builder.bitcast(ptr,
                           context.get_value_type(ray_gen_data).as_pointer())
-                          #ir.PointerType(context.get_value_type(ray_gen_data)))
     rgd = cgutils.create_struct_proxy(ray_gen_data)(context, builder)
     rptr = cgutils.gep_inbounds(builder, ptr, 0, 0)
     gptr = cgutils.gep_inbounds(builder, ptr, 0, 1)
