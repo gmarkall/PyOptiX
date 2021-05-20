@@ -170,20 +170,16 @@ def create_program_groups( ctx, module ):
     program_group_options = optix.ProgramGroupOptions()
 
     # TODO: optix.ProgramGroup.Kind.RAYGEN ?
-    #raygen_prog_group_desc                          = optix.ProgramGroupDesc( 0, "", module)
     raygen_prog_group_desc                          = optix.ProgramGroupDesc()
     raygen_prog_group_desc.raygenModule             = module
     raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__hello"
-
     raygen_prog_group, log = ctx.programGroupCreate(
             [ raygen_prog_group_desc ], 
             program_group_options,
             )
     print( "\tProgramGroup raygen create log: <<<{}>>>".format( log ) )
 
-    miss_prog_group_desc  = optix.ProgramGroupDesc()
-    miss_prog_group_desc.missEntryFunctionName = "" 
-
+    miss_prog_group_desc  = optix.ProgramGroupDesc( missEntryFunctionName = "")
     miss_prog_group, log = ctx.programGroupCreate(
             [ miss_prog_group_desc ],
             program_group_options

@@ -391,7 +391,7 @@ struct ProgramGroupDesc
     std::string entryFunctionName0;
     std::string entryFunctionName1;
     std::string entryFunctionName2;
-    OptixProgramGroupDesc program_group_desc;
+    OptixProgramGroupDesc program_group_desc{};
 };
 
 
@@ -761,17 +761,28 @@ py::tuple programGroupCreate(
     std::vector<OptixProgramGroupDesc> program_groups_descs;
     for( auto list_elem : programDescriptions )
     {
-        pyoptix::ProgramGroupDesc& pydesc = 
-        list_elem.cast<pyoptix::ProgramGroupDesc&>();
+        pyoptix::ProgramGroupDesc& pydesc = list_elem.cast<pyoptix::ProgramGroupDesc&>();
+
         switch( pydesc.program_group_desc.kind )
         {
             case OPTIX_PROGRAM_GROUP_KIND_RAYGEN:
-            case OPTIX_PROGRAM_GROUP_KIND_MISS:
-            case OPTIX_PROGRAM_GROUP_KIND_EXCEPTION:
                 pydesc.program_group_desc.raygen.entryFunctionName = 
                     !pydesc.entryFunctionName0.empty() ? 
                     pydesc.entryFunctionName0.c_str() : 
                     nullptr;
+                break;
+            case OPTIX_PROGRAM_GROUP_KIND_MISS:
+                pydesc.program_group_desc.miss.entryFunctionName = 
+                    !pydesc.entryFunctionName0.empty() ? 
+                    pydesc.entryFunctionName0.c_str() : 
+                    nullptr;
+                break;
+            case OPTIX_PROGRAM_GROUP_KIND_EXCEPTION:
+                pydesc.program_group_desc.exception.entryFunctionName = 
+                    !pydesc.entryFunctionName0.empty() ? 
+                    pydesc.entryFunctionName0.c_str() : 
+                    nullptr;
+                break;
             case OPTIX_PROGRAM_GROUP_KIND_HITGROUP:
                 pydesc.program_group_desc.hitgroup.entryFunctionNameCH = 
                     !pydesc.entryFunctionName0.empty() ? 
@@ -798,6 +809,7 @@ py::tuple programGroupCreate(
                 break;
 
         }
+        
         program_groups_descs.push_back( pydesc.program_group_desc );
     }
     std::vector<OptixProgramGroup> program_groups( programDescriptions.size() );
