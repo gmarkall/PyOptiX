@@ -18,6 +18,7 @@ from numba.core.imputils import lower_constant
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
 from numba.cuda import compile_ptx_for_current_device
+from numba.cuda.cudadrv import nvvm
 from numba.cuda.cudadecl import register, register_attr, register_global
 from numba.cuda.cudaimpl import lower, lower_attr
 from numba.cuda.types import dim3
@@ -250,7 +251,8 @@ def constant_params(context, builder, ty, pyval):
         gvar = builder.module.get_global('params')
     except KeyError:
         llty = context.get_value_type(ty)
-        gvar = cgutils.add_global_variable(builder.module, llty, 'params')
+        gvar = cgutils.add_global_variable(builder.module, llty, 'params',
+                                          addrspace=nvvm.ADDRSPACE_CONSTANT)
         gvar.linkage = 'external'
         gvar.global_constant = True
 
@@ -678,11 +680,6 @@ def main():
     # Demangle name
     hello_ptx = hello_ptx.replace('_ZN6cudapy8__main__19__raygen__hello$241E',
                                   '__raygen__hello')
-
-    # Hack for global var things
-    hello_ptx = hello_ptx.replace('.extern .global .align 8 .b8 params[16];',
-                                  '.visible .const .align 8 .b8 params[16];')
-    hello_ptx = hello_ptx.replace('ld.global', 'ld.const')
 
     init_optix()
 
