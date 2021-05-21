@@ -25,3 +25,9 @@ target_compile_features( optix PRIVATE
     cxx_std_17
     )
 
+add_custom_command(
+    TARGET optix POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${OptiX_INCLUDE}
+    $<TARGET_FILE_DIR:optix>/include
+)
