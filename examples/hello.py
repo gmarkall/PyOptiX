@@ -591,27 +591,18 @@ def create_program_groups( ctx, module ):
 
     # TODO: optix.ProgramGroup.Kind.RAYGEN ?
     raygen_prog_group_desc                          = optix.ProgramGroupDesc()
-    raygen_prog_group_desc.kind                     = \
-        optix.PROGRAM_GROUP_KIND_RAYGEN 
     raygen_prog_group_desc.raygenModule             = module
     raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__hello"
-
-    log = ""
-    raygen_prog_group = ctx.programGroupCreate(
+    raygen_prog_group, log = ctx.programGroupCreate(
             [ raygen_prog_group_desc ], 
             program_group_options,
-            log
             )
     print( "\tProgramGroup raygen create log: <<<{}>>>".format( log ) )
 
-    # Leave miss group's module and entryfunc name null
-    miss_prog_group_desc  = optix.ProgramGroupDesc()
-    miss_prog_group_desc.kind = optix.PROGRAM_GROUP_KIND_MISS
-
-    miss_prog_group = ctx.programGroupCreate(
+    miss_prog_group_desc  = optix.ProgramGroupDesc( missEntryFunctionName = "")
+    miss_prog_group, log = ctx.programGroupCreate(
             [ miss_prog_group_desc ],
-            program_group_options,
-            log
+            program_group_options
             )
     print( "\tProgramGroup miss create log: <<<{}>>>".format( log ) )
 
