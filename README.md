@@ -6,8 +6,8 @@ Python bindings for OptiX 7.
 
 ### OptiX SDK
 
-Install the [OptiX 7.2.0
-SDK](https://developer.nvidia.com/optix/downloads/7.2.0/linux64).
+Install the [OptiX 7.3.0
+SDK](https://developer.nvidia.com/optix/downloads/7.3.0/linux64).
 
 
 ### Conda environment
@@ -33,8 +33,8 @@ export PYOPTIX_CMAKE_ARGS="-DOptiX_INSTALL_DIR=<optix install dir>"
 pip3 install --global-option build --global-option --debug .
 ```
 
-`<optix install dir>` should be the OptiX 7.2.0 install location - for example,
-`/home/gmarkall/numbadev/NVIDIA-OptiX-SDK-7.2.0-linux64-x86_64`.
+`<optix install dir>` should be the OptiX 7.3.0 install location - for example,
+`/home/gmarkall/numbadev/NVIDIA-OptiX-SDK-7.3.0-linux64-x86_64`.
 
 
 ## Running the example
@@ -58,7 +58,7 @@ index 16a153e..317cc37 100755
          #'-IC:\\Program Files\\NVIDIA GPU Computing Toolkit\CUDA\\v11.1\include'
          '-I/usr/local/cuda/include',
 -        '-I/home/kmorley/Code/support/NVIDIA-OptiX-SDK-7.2.0-linux64-x86_64/include/'
-+        '-I/home/gmarkall/numbadev/NVIDIA-OptiX-SDK-7.2.0-linux64-x86_64/include/'
++        '-I/home/gmarkall/numbadev/NVIDIA-OptiX-SDK-7.3.0-linux64-x86_64/include/'
          ] )
      return ptx
  
