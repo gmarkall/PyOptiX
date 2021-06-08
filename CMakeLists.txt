@@ -6,9 +6,8 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_MODULE_PATH}
     )
 
-find_package( OptiX REQUIRED )
-
-find_package(CUDA 10.0 REQUIRED)
+find_package( OptiX REQUIRED     )
+find_package( CUDA 10.0 REQUIRED )
 
 include_directories(
     "${OptiX_INCLUDE}"
@@ -16,6 +15,7 @@ include_directories(
     )
 
 add_subdirectory(pybind11)
+
 
 pybind11_add_module(optix src/main.cpp)
 target_link_libraries( optix PRIVATE
