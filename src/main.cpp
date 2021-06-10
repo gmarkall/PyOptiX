@@ -42,24 +42,17 @@ namespace py = pybind11;
 namespace pyoptix
 {
 
-//------------------------------------------------------------------------------
-//
-// Helpers
-//
-//------------------------------------------------------------------------------
+void context_log_cb( 
+    unsigned int level, 
+    const char* tag, 
+    const char* message, 
+    void* cbdata
+    );
 
-constexpr size_t LOG_BUFFER_MAX_SIZE = 2048u;
-
-void context_log_cb( unsigned int level, const char* tag, const char* message, void* cbdata  )
-{
-    py::object cb = py::reinterpret_borrow<py::object>( 
-        reinterpret_cast<PyObject*>( cbdata )
-        );
-    cb( level, tag, message );
-}
-
-
-
+void convertBuildInputs( 
+    py::list build_inputs_in, 
+    std::vector<OptixBuildInput>& build_inputs
+    );
 //------------------------------------------------------------------------------
 //
 // Opaque type struct wrappers
@@ -131,16 +124,86 @@ struct DeviceContextOptions
 };
 
 
+struct BuildInputTriangleArray
+{
+    BuildInputTriangleArray(
+        const py::list&        vertexBuffers_, // list of CUdeviceptr
+        OptixVertexFormat      vertexFormat,
+        unsigned int           vertexStrideInBytes,
+        CUdeviceptr            indexBuffer,
+        unsigned int           numIndexTriplets,
+        OptixIndicesFormat     indexFormat,
+        unsigned int           indexStrideInBytes,
+        CUdeviceptr            preTransform,
+        const py::list&        flags_, // list of uint32_t 
+        unsigned int           numSbtRecords,
+        CUdeviceptr            sbtIndexOffsetBuffer,
+        unsigned int           sbtIndexOffsetSizeInBytes,
+        unsigned int           sbtIndexOffsetStrideInBytes,
+        unsigned int           primitiveIndexOffset,
+        OptixTransformFormat   transformFormat
+        )
+    {
+        vertexBuffers                           =  vertexBuffers_.cast<std::vector<CUdeviceptr> >();
+        build_input.vertexFormat                = vertexFormat;
+        build_input.vertexStrideInBytes         = vertexStrideInBytes;
+        build_input.indexBuffer                 = indexBuffer;
+        build_input.numIndexTriplets            = numIndexTriplets;
+        build_input.indexFormat                 = indexFormat;
+        build_input.indexStrideInBytes          = indexStrideInBytes;
+        build_input.preTransform                = preTransform;
+        flags                                   =  flags_.cast<std::vector<unsigned int> >();
+        build_input.numSbtRecords               = numSbtRecords;
+        build_input.sbtIndexOffsetBuffer        = sbtIndexOffsetBuffer;
+        build_input.sbtIndexOffsetSizeInBytes = sbtIndexOffsetSizeInBytes;
+        build_input.sbtIndexOffsetStrideInBytes = sbtIndexOffsetStrideInBytes;
+        build_input.primitiveIndexOffset        = primitiveIndexOffset;
+        build_input.numSbtRecords               = numSbtRecords;
+        build_input.transformFormat             = transformFormat;
+        
+    }
+
+    void sync()
+    {
+        build_input.vertexBuffers = vertexBuffers.data();
+        build_input.flags         = flags.data();
+    }
+
+
+    std::vector<unsigned int> flags;
+    std::vector<CUdeviceptr>  vertexBuffers;
+    OptixBuildInputTriangleArray build_input;
+};
+
+
+struct BuildInputCurveArray
+{
+    OptixBuildInputCurveArray build_input;
+};
+
+
+struct BuildInputCustomPrimitiveArray
+{
+    OptixBuildInputCustomPrimitiveArray build_input;
+};
+
+
+struct BuildInputInstanceArray
+{
+    OptixBuildInputInstanceArray build_input;
+};
+
+
 struct PipelineCompileOptions
 {
     PipelineCompileOptions( 
-        int32_t   usesMotionBlur,
+        bool      usesMotionBlur,
         uint32_t  traversableGraphFlags,
         int32_t   numPayloadValues,
         int32_t   numAttributeValues,
         uint32_t  exceptionFlags,
         const char* pipelineLaunchParamsVariableName_,
-        uint32_t  usesPrimitiveTypeFlags
+        int32_t  usesPrimitiveTypeFlags
         )
     {
         options.usesMotionBlur         = usesMotionBlur;
@@ -394,6 +457,60 @@ struct ProgramGroupDesc
     OptixProgramGroupDesc program_group_desc{};
 };
 
+
+//------------------------------------------------------------------------------
+//
+// Helpers
+//
+//------------------------------------------------------------------------------
+
+constexpr size_t LOG_BUFFER_MAX_SIZE = 2048u;
+
+void context_log_cb( unsigned int level, const char* tag, const char* message, void* cbdata  )
+{
+    py::object cb = py::reinterpret_borrow<py::object>( 
+        reinterpret_cast<PyObject*>( cbdata )
+        );
+    cb( level, tag, message );
+}
+
+
+void convertBuildInputs( 
+        py::list build_inputs_in, 
+        std::vector<OptixBuildInput>& build_inputs
+        )
+{
+    build_inputs.resize( build_inputs_in.size() );
+    int32_t idx = 0;
+    for( auto list_elem : build_inputs_in )
+    {
+        if( py::isinstance<pyoptix::BuildInputTriangleArray>( list_elem ) )
+        {
+            pyoptix::BuildInputTriangleArray& tri_array= list_elem.cast<pyoptix::BuildInputTriangleArray&>();
+            tri_array.sync();
+            build_inputs[idx].type          = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
+            build_inputs[idx].triangleArray = tri_array.build_input; 
+        }
+        else if( py::isinstance<pyoptix::BuildInputCurveArray>( list_elem ) )
+        {
+        }
+        else if( py::isinstance<pyoptix::BuildInputCustomPrimitiveArray>( list_elem ) )
+        {
+        }
+        else if( py::isinstance<pyoptix::BuildInputInstanceArray>( list_elem ) )
+        {
+        }
+        else
+        {
+            throw std::runtime_error( 
+                "Context.accelComputeMemoryUsage called with non-build input types"
+                " in buildInputs param" 
+                );
+        }
+
+        ++idx;
+    }
+}
 
 //------------------------------------------------------------------------------
 //
@@ -893,56 +1010,82 @@ void sbtRecordPackHeader(
     );
 }
  
-void accelComputeMemoryUsage( 
-       pyoptix::DeviceContext            context,
-       const OptixAccelBuildOptions* accelOptions,
-       const OptixBuildInput*        buildInputs,
-       unsigned int                  numBuildInputs,
-       OptixAccelBufferSizes*        bufferSizes
+OptixAccelBufferSizes accelComputeMemoryUsage( 
+       pyoptix::DeviceContext   context,
+       const py::list&          accelOptions, // OptixAccelBuildOptions* 
+       const py::list&          buildInputs   // OptixBuildInput*
     )
 {
+    const uint32_t num_inputs = buildInputs.size();
+    if( accelOptions.size() != num_inputs )
+        throw std::runtime_error( 
+            "Context.accelComputeMemoryUsage called with mismatched number "
+            "of accel options and build inputs" 
+            );
+    auto accel_options = accelOptions.cast<std::vector<OptixAccelBuildOptions> >();
+
+    std::vector<OptixBuildInput> build_inputs;
+    convertBuildInputs( buildInputs, build_inputs );
+    
+    OptixAccelBufferSizes bufferSizes{};
     PYOPTIX_CHECK( 
         optixAccelComputeMemoryUsage(
             context.deviceContext,
-            accelOptions,
-            buildInputs,
-            numBuildInputs,
-            bufferSizes
+            accel_options.data(),
+            build_inputs.data(),
+            num_inputs,
+            &bufferSizes
         )
     );
+    return bufferSizes;
 }
  
-void accelBuild( 
+OptixTraversableHandle accelBuild( 
        pyoptix::DeviceContext        context,
-       uintptr_t         stream,
-       const OptixAccelBuildOptions* accelOptions,
-       const OptixBuildInput*        buildInputs,
-       unsigned int                  numBuildInputs,
+       uintptr_t                     stream,
+       const py::list&               accelOptions, // OptixAccelBuildOptions* 
+       const py::list&               buildInputs,  // OptixBuildInput*
        CUdeviceptr                   tempBuffer,
        size_t                        tempBufferSizeInBytes,
        CUdeviceptr                   outputBuffer,
        size_t                        outputBufferSizeInBytes,
-       OptixTraversableHandle*       outputHandle,
-       const OptixAccelEmitDesc*     emittedProperties,
-       unsigned int                  numEmittedProperties
+       const py::list&               emittedProperties // OptixAccelEmitDesc*
     )
 {
+    const uint32_t num_inputs = buildInputs.size();
+    if( accelOptions.size() != num_inputs )
+        throw std::runtime_error( 
+            "Context.accelComputeMemoryUsage called with mismatched number "
+            "of accel options and build inputs" 
+            );
+    auto accel_options = accelOptions.cast<std::vector<OptixAccelBuildOptions> >();
+
+    std::vector<OptixBuildInput> build_inputs;
+    convertBuildInputs( buildInputs, build_inputs );
+    
+    const uint32_t num_properties = emittedProperties.size();
+    auto emitted_properties = emittedProperties.cast<std::vector<OptixAccelEmitDesc> >();
+
+    OptixTraversableHandle output_handle;
     PYOPTIX_CHECK( 
         optixAccelBuild(
             context.deviceContext,
             reinterpret_cast<CUstream>( stream ),
-            accelOptions,
-            buildInputs,
-            numBuildInputs,
+            accel_options.data(),
+            build_inputs.data(),
+            num_inputs,
             tempBuffer,
             tempBufferSizeInBytes,
             outputBuffer,
             outputBufferSizeInBytes,
-            outputHandle,
-            emittedProperties,
-            numEmittedProperties
+            &output_handle,
+            emitted_properties.empty() ? nullptr : emitted_properties.data(),
+            num_properties
         )
     );
+
+    std::cerr << "IN PYOPTIX: gas_handle: " << output_handle << std::endl;
+    return output_handle;
 }
  
 void accelGetRelocationInfo( 
@@ -1490,7 +1633,7 @@ PYBIND11_MODULE( _optix, m )
         .value( "PRIMITIVE_TYPE_TRIANGLE", OPTIX_PRIMITIVE_TYPE_TRIANGLE )
         .export_values();
 
-    py::enum_<OptixPrimitiveTypeFlags>(m, "PrimitiveTypeFlags")
+    py::enum_<OptixPrimitiveTypeFlags>(m, "PmitiveTypeFlags", py::arithmetic() )
         .value( "PRIMITIVE_TYPE_FLAGS_CUSTOM", OPTIX_PRIMITIVE_TYPE_FLAGS_CUSTOM )
         .value( "PRIMITIVE_TYPE_FLAGS_ROUND_QUADRATIC_BSPLINE", OPTIX_PRIMITIVE_TYPE_FLAGS_ROUND_QUADRATIC_BSPLINE )
         .value( "PRIMITIVE_TYPE_FLAGS_ROUND_CUBIC_BSPLINE", OPTIX_PRIMITIVE_TYPE_FLAGS_ROUND_CUBIC_BSPLINE )
@@ -1786,24 +1929,137 @@ PYBIND11_MODULE( _optix, m )
             { self.options.validationMode = val; }
         );
 
-    py::class_<OptixBuildInputTriangleArray>(m, "BuildInputTriangleArray")
-        .def( py::init([]() { return std::unique_ptr<OptixBuildInputTriangleArray>(new OptixBuildInputTriangleArray{} ); } ) )
-        .def_readwrite( "vertexBuffers", &OptixBuildInputTriangleArray::vertexBuffers )
-        .def_readwrite( "numVertices", &OptixBuildInputTriangleArray::numVertices )
-        .def_readwrite( "vertexFormat", &OptixBuildInputTriangleArray::vertexFormat )
-        .def_readwrite( "vertexStrideInBytes", &OptixBuildInputTriangleArray::vertexStrideInBytes )
-        .def_readwrite( "indexBuffer", &OptixBuildInputTriangleArray::indexBuffer )
-        .def_readwrite( "numIndexTriplets", &OptixBuildInputTriangleArray::numIndexTriplets )
-        .def_readwrite( "indexFormat", &OptixBuildInputTriangleArray::indexFormat )
-        .def_readwrite( "indexStrideInBytes", &OptixBuildInputTriangleArray::indexStrideInBytes )
-        .def_readwrite( "preTransform", &OptixBuildInputTriangleArray::preTransform )
-        .def_readwrite( "flags", &OptixBuildInputTriangleArray::flags )
-        .def_readwrite( "numSbtRecords", &OptixBuildInputTriangleArray::numSbtRecords )
-        .def_readwrite( "sbtIndexOffsetBuffer", &OptixBuildInputTriangleArray::sbtIndexOffsetBuffer )
-        .def_readwrite( "sbtIndexOffsetSizeInBytes", &OptixBuildInputTriangleArray::sbtIndexOffsetSizeInBytes )
-        .def_readwrite( "sbtIndexOffsetStrideInBytes", &OptixBuildInputTriangleArray::sbtIndexOffsetStrideInBytes )
-        .def_readwrite( "primitiveIndexOffset", &OptixBuildInputTriangleArray::primitiveIndexOffset )
-        .def_readwrite( "transformFormat", &OptixBuildInputTriangleArray::transformFormat )
+    py::class_<pyoptix::BuildInputTriangleArray>(m, "BuildInputTriangleArray")
+        .def( 
+            py::init< 
+                const py::list&,
+                OptixVertexFormat,
+                unsigned int,
+                CUdeviceptr,
+                unsigned int,
+                OptixIndicesFormat,
+                unsigned int,
+                CUdeviceptr,
+                const py::list&,
+                unsigned int,
+                CUdeviceptr,
+                unsigned int,
+                unsigned int,
+                unsigned int,
+                OptixTransformFormat
+            >(), 
+            py::arg( "vertexBuffers_"              ) = py::list(), // list of CUdeviceptr
+            py::arg( "vertexFormat"                ) = OPTIX_VERTEX_FORMAT_NONE,
+            py::arg( "vertexStrideInBytes"         ) = 0u,
+            py::arg( "indexBuffer"                 ) = 0u,
+            py::arg( "numIndexTriplets"            ) = 0u,
+            py::arg( "indexFormat"                 ) = OPTIX_INDICES_FORMAT_NONE,
+            py::arg( "indexStrideInBytes"          ) = 0u,
+            py::arg( "preTransform"                ) = 0u,
+            py::arg( "flags_"                      ) = py::list(), // list of uint32_t 
+            py::arg( "numSbtRecords"               ) = 0u,
+            py::arg( "sbtIndexOffsetBuffer"        ) = 0u,
+            py::arg( "sbtIndexOffsetSizeInBytes"   ) = 0u,
+            py::arg( "sbtIndexOffsetStrideInBytes" ) = 0u,
+            py::arg( "primitiveIndexOffset"        ) = 0u,
+            py::arg( "transformFormat"             ) = OPTIX_TRANSFORM_FORMAT_NONE
+        )
+        .def_property( "vertexBuffers", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return py::cast( self.vertexBuffers ); }, 
+            [](pyoptix::BuildInputTriangleArray& self, py::list& val) 
+            { self.vertexBuffers =  val.cast<std::vector<CUdeviceptr> >(); }
+            )
+        .def_property( "numVertices", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.numVertices; }, 
+            [](pyoptix::BuildInputTriangleArray& self, unsigned int val) 
+            { self.build_input.numVertices = val; }
+            )
+        .def_property( "vertexFormat", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.vertexFormat; }, 
+            [](pyoptix::BuildInputTriangleArray& self, OptixVertexFormat val) 
+            { self.build_input.vertexFormat = val; }
+            )
+        .def_property( "vertexStrideInBytes", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.vertexStrideInBytes; }, 
+            [](pyoptix::BuildInputTriangleArray& self, unsigned int val) 
+            { self.build_input.vertexStrideInBytes = val; }
+            )
+        .def_property( "indexBuffer", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.indexBuffer; }, 
+            [](pyoptix::BuildInputTriangleArray& self, CUdeviceptr val) 
+            { self.build_input.indexBuffer = val; }
+            )
+        .def_property( "numIndexTriplets", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.numIndexTriplets; }, 
+            [](pyoptix::BuildInputTriangleArray& self, unsigned int val) 
+            { self.build_input.numIndexTriplets = val; }
+            )
+        .def_property( "indexFormat", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.indexFormat; }, 
+            [](pyoptix::BuildInputTriangleArray& self, OptixIndicesFormat val) 
+            { self.build_input.indexFormat = val; }
+            )
+        .def_property( "indexStrideInBytes", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.indexStrideInBytes; }, 
+            [](pyoptix::BuildInputTriangleArray& self, unsigned int val) 
+            { self.build_input.indexStrideInBytes = val; }
+            )
+        .def_property( "preTransform", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.preTransform; }, 
+            [](pyoptix::BuildInputTriangleArray& self, CUdeviceptr val) 
+            { self.build_input.preTransform = val; }
+            )
+        .def_property( "flags", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return py::cast( self.flags ); }, 
+            [](pyoptix::BuildInputTriangleArray& self, py::list& val) 
+            { self.flags =  val.cast<std::vector<unsigned int> >(); }
+            )
+        .def_property( "numSbtRecords", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.numSbtRecords; }, 
+            [](pyoptix::BuildInputTriangleArray& self, unsigned int val) 
+            { self.build_input.numSbtRecords = val; }
+            )
+        .def_property( "sbtIndexOffsetBuffer", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.sbtIndexOffsetBuffer; }, 
+            [](pyoptix::BuildInputTriangleArray& self, CUdeviceptr val) 
+            { self.build_input.sbtIndexOffsetBuffer = val; }
+            )
+        .def_property( "sbtIndexOffsetSizeInBytes", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.sbtIndexOffsetSizeInBytes; }, 
+            [](pyoptix::BuildInputTriangleArray& self, unsigned int val) 
+            { self.build_input.sbtIndexOffsetSizeInBytes = val; }
+            )
+        .def_property( "sbtIndexOffsetStrideInBytes", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.sbtIndexOffsetStrideInBytes; }, 
+            [](pyoptix::BuildInputTriangleArray& self, unsigned int val) 
+            { self.build_input.sbtIndexOffsetStrideInBytes = val; }
+            )
+        .def_property( "primitiveIndexOffset", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.primitiveIndexOffset; }, 
+            [](pyoptix::BuildInputTriangleArray& self, unsigned int val) 
+            { self.build_input.primitiveIndexOffset = val; }
+            )
+        .def_property( "transformFormat", 
+            []( const pyoptix::BuildInputTriangleArray& self ) 
+            { return self.build_input.transformFormat; }, 
+            [](pyoptix::BuildInputTriangleArray& self, OptixTransformFormat val) 
+            { self.build_input.transformFormat = val; }
+            )
         ;
 
     py::class_<OptixBuildInputCurveArray>(m, "BuildInputCurveArray")
@@ -1879,7 +2135,23 @@ PYBIND11_MODULE( _optix, m )
         ;
 
     py::class_<OptixAccelBuildOptions>(m, "AccelBuildOptions")
-        .def( py::init([]() { return std::unique_ptr<OptixAccelBuildOptions>(new OptixAccelBuildOptions{} ); } ) )
+        .def( py::init(
+                []( unsigned int buildFlags,
+                    OptixBuildOperation operation,
+                    const OptixMotionOptions& motionOptions
+                    ) 
+                { 
+                    auto opts = std::unique_ptr<OptixAccelBuildOptions>(new OptixAccelBuildOptions{} ); 
+                    opts->buildFlags = buildFlags;
+                    opts->operation = operation;
+                    opts->motionOptions = motionOptions;
+                    return opts;
+                } 
+            ),
+            py::arg( "buildFlags"    ) = 0,
+            py::arg( "operation"     ) = OPTIX_BUILD_OPERATION_BUILD,
+            py::arg( "motionOptions" ) = OptixMotionOptions{}
+        )
         .def_readwrite( "buildFlags", &OptixAccelBuildOptions::buildFlags )
         .def_readwrite( "operation", &OptixAccelBuildOptions::operation )
         .def_readwrite( "motionOptions", &OptixAccelBuildOptions::motionOptions )
@@ -2333,18 +2605,18 @@ PYBIND11_MODULE( _optix, m )
     py::class_<pyoptix::PipelineCompileOptions>(m, "PipelineCompileOptions")
         .def( 
             py::init<
-                int32_t,
+                bool,
                 uint32_t,
                 int32_t,
                 int32_t,
                 uint32_t,
                 const char*,
-                uint32_t>(), 
+                int32_t>(), 
             py::arg( "usesMotionBlur" )=0,
-            py::arg( "traversableGraphFlags" )=0,
+            py::arg( "traversableGraphFlags" )=0u,
             py::arg( "numPayloadValues" )=0,
             py::arg( "numAttributeValues" )=0,
-            py::arg( "exceptionFlags" )=0,
+            py::arg( "exceptionFlags" )=0u,
             py::arg( "pipelineLaunchParamsVariableName" )=nullptr,
             py::arg( "usesPrimitiveTypeFlags" )=0
             )
@@ -2357,7 +2629,7 @@ PYBIND11_MODULE( _optix, m )
         .def_property( "traversableGraphFlags",
             [](const pyoptix::PipelineCompileOptions& self) 
             { return self.options.traversableGraphFlags; },
-            [](pyoptix::PipelineCompileOptions& self, OptixTraversableGraphFlags val) 
+            [](pyoptix::PipelineCompileOptions& self, uint32_t val) 
             { self.options.traversableGraphFlags = val; }
         )
         .def_property( "numPayloadValues",
@@ -2375,7 +2647,7 @@ PYBIND11_MODULE( _optix, m )
         .def_property( "exceptionFlags",
             [](const pyoptix::PipelineCompileOptions& self) 
             { return self.options.exceptionFlags; },
-            [](pyoptix::PipelineCompileOptions& self, OptixExceptionFlags val) 
+            [](pyoptix::PipelineCompileOptions& self, uint32_t val) 
             { self.options.exceptionFlags = val; }
         )
         .def_readwrite( 
@@ -2385,7 +2657,7 @@ PYBIND11_MODULE( _optix, m )
         .def_property( "usesPrimitiveTypeFlags",
             [](const pyoptix::PipelineCompileOptions& self) 
             { return self.options.usesPrimitiveTypeFlags; },
-            [](pyoptix::PipelineCompileOptions& self, bool val) 
+            [](pyoptix::PipelineCompileOptions& self, uint32_t val) 
             { self.options.usesPrimitiveTypeFlags = val; }
         )
         ;
@@ -2413,7 +2685,7 @@ PYBIND11_MODULE( _optix, m )
 
     py::class_<OptixStackSizes>(m, "StackSizes")
         .def( py::init( []() 
-            { return std::unique_ptr<OptixStackSizes>(new OptixStackSizes{} ); }
+           { return std::unique_ptr<OptixStackSizes>(new OptixStackSizes{} ); }
         ) )
         .def_readwrite( "cssRG", &OptixStackSizes::cssRG )
         .def_readwrite( "cssMS", &OptixStackSizes::cssMS )
@@ -2442,6 +2714,12 @@ PYBIND11_MODULE( _optix, m )
             [](pyoptix::BuiltinISOptions& self, bool val )
             { self.options.usesMotionBlur = val; }
         )
+        ;
+
+    py::class_<OptixTraversableHandle>(m, "TraversableHandle")
+        .def( py::init( []() 
+           { return std::unique_ptr<OptixTraversableHandle>(new OptixTraversableHandle{} ); }
+        ) )
         ;
 }
 
