@@ -42,7 +42,7 @@ pip3 install --global-option build --global-option --debug .
 
 ## Running the example
 
-The example can be run from the root of the repository with:
+The example can be run from the examples directory with:
 
 ```
 python examples/hello.py
