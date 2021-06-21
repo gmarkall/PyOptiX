@@ -391,6 +391,82 @@ def launch( pipeline, sbt, trav_handle ):
     return h_pix
 
 
+# CUDA Python code
+
+@cuda.jit(device=True)
+def setPayload(p):
+    optix.SetPayload_0(float_as_int(p.x))
+    optix.SetPayload_1(float_as_int(p.y))
+    optix.SetPayload_2(float_as_int(p.z))
+
+
+@cude.jit(device=True)
+def computeRay(idx, dim, origin, direction):
+    U = params.cam_u;
+    V = params.cam_v;
+    W = params.cam_w;
+    d = types.float32(2.0) * make_float2(
+            types.float32(idx.x) / types.float32(dim.x),
+            types.float32(idx.y) / types.float32(dim.y)
+        ) - types.float32(1.0)
+
+    origin[0] = params.cam_eye;
+    direction[0] = normalize(d.x * U + d.y * V + W)
+
+
+@cuda.jit
+def __raygen__rg():
+    # Lookup our location within the launch grid
+    idx = optix.GetLaunchIndex()
+    dim = optix.GetLaunchDimensions()
+
+    # Map our launch idx to a screen location and create a ray from the camera
+    # location through the screen
+    ray_origin = cuda.local.arrary(1, float3)
+    ray_direction = cuda.local.array(1, float3)
+    computeRay(make_uint3(idx.x, idx.y, 0), dim, ray_origin, ray_direction)
+
+    # Trace the ray against our scene hierarchy
+    result = make_float3(0);
+    p0 = cuda.local.array(1, types.int32)
+    p1 = cuda.local.array(1, types.int32)
+    p2 = cuda.local.array(1, types.int32)
+    optix.Trace(
+            params.handle,
+            ray_origin,
+            ray_direction,
+            types.float32(0.0),         # Min intersection distance
+            types.float32(1e16),        # Max intersection distance
+            types.float32(0.0),         # rayTime -- used for motion blur
+            OptixVisibilityMask(255),   # Specify always visible
+            OPTIX_RAY_FLAG_NONE,
+            0,                          # SBT offset   -- See SBT discussion
+            1,                          # SBT stride   -- See SBT discussion
+            0,                          # missSBTIndex -- See SBT discussion
+            p0, p1, p2)
+    result.x = int_as_float(p0);
+    result.y = int_as_float(p1);
+    result.z = int_as_float(p2);
+
+    # Record results in our output raster
+    params.image[idx.y * params.image_width + idx.x] = make_color( result );
+
+
+@cuda.jit
+def __miss__ms():
+    miss_data  = MissData(optix.GetSbtDataPointer())
+    setPayload(miss_data.bg_color)
+
+
+@cuda.jit
+def __closesthit__ch():
+    # When built-in triangle intersection is used, a number of fundamental
+    # attributes are provided by the OptiX API, indlucing barycentric coordinates.
+    barycentrics = optix.GetTriangleBarycentrics()
+
+    setPayload(make_float3(barycentrics, float32(1.0)))
+
+
 #-------------------------------------------------------------------------------
 #
 # main
