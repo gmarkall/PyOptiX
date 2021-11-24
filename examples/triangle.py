@@ -391,6 +391,41 @@ def launch( pipeline, sbt, trav_handle ):
     return h_pix
 
 
+# Numba compilation
+# -----------------
+
+# An equivalent to the compile_cuda function for Python kernels. The types of
+# the arguments to the kernel must be provided, if there are any.
+
+def compile_numba(f, sig=(), debug=False):
+    # Based on numba.cuda.compile_ptx. We don't just use
+    # compile_ptx_for_current_device because it generates a kernel with a
+    # mangled name. For proceeding beyond this prototype, an option should be
+    # added to compile_ptx in Numba to not mangle the function name.
+
+    nvvm_options = {
+        'debug': debug,
+        'fastmath': False,
+        'opt': 0 if debug else 3,
+    }
+
+    cres = numba_compile_cuda(f, None, sig, debug=debug,
+                              nvvm_options=nvvm_options)
+    fname = cres.fndesc.llvm_func_name
+    tgt = cres.target_context
+    lib, kernel = tgt.prepare_cuda_kernel(cres.library, fname,
+                                          cres.signature.args, debug,
+                                          nvvm_options)
+    cc = get_current_device().compute_capability
+    ptx = lib.get_asm_str(cc=cc)
+
+    # Demangle name
+    mangled_name = kernel.name
+    original_name = cres.library.name
+    return ptx.replace(mangled_name, original_name)
+
+
+
 # CUDA Python code
 
 @cuda.jit(device=True)
@@ -475,7 +510,9 @@ def __closesthit__ch():
 
 
 def main():
+    #numba_ptx = compile_numba(__raygen__rg)
     triangle_ptx = compile_cuda( "examples/triangle.cu" )
+    print(triangle_ptx)
 
     init_optix()
 
