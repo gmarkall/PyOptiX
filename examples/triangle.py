@@ -9,6 +9,7 @@ import array
 import ctypes         # C interop helpers
 from PIL import Image, ImageOps # Image IO
 
+from numba import cuda
 
 #-------------------------------------------------------------------------------
 #
@@ -413,9 +414,10 @@ def compile_numba(f, sig=(), debug=False):
                               nvvm_options=nvvm_options)
     fname = cres.fndesc.llvm_func_name
     tgt = cres.target_context
-    lib, kernel = tgt.prepare_cuda_kernel(cres.library, fname,
-                                          cres.signature.args, debug,
-                                          nvvm_options)
+    filename = cres.type_annotation.filename
+    linenum = int(cres.type_annotation.linenum)
+    lib, kernel = tgt.prepare_cuda_kernel(cres.library, cres.fndesc, debug,
+                                          nvvm_options, filename, linenum)
     cc = get_current_device().compute_capability
     ptx = lib.get_asm_str(cc=cc)
 
@@ -435,7 +437,7 @@ def setPayload(p):
     optix.SetPayload_2(float_as_int(p.z))
 
 
-@cude.jit(device=True)
+@cuda.jit(device=True)
 def computeRay(idx, dim, origin, direction):
     U = params.cam_u;
     V = params.cam_v;

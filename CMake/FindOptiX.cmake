@@ -54,9 +54,6 @@ find_path(OptiX_INCLUDE
   PATHS "${OptiX_INSTALL_DIR}/include"
   NO_DEFAULT_PATH
   )
-find_path(OptiX_INCLUDE
-  NAMES optix.h
-  )
 
 # Check to make sure we found what we were looking for
 function(OptiX_report_error error_message required component )

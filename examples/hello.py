@@ -275,9 +275,10 @@ def compile_numba(f, sig=(), debug=False):
                               nvvm_options=nvvm_options)
     fname = cres.fndesc.llvm_func_name
     tgt = cres.target_context
-    lib, kernel = tgt.prepare_cuda_kernel(cres.library, fname,
-                                          cres.signature.args, debug,
-                                          nvvm_options)
+    filename = cres.type_annotation.filename
+    linenum = int(cres.type_annotation.linenum)
+    lib, kernel = tgt.prepare_cuda_kernel(cres.library, cres.fndesc, debug,
+                                          nvvm_options, filename, linenum)
     cc = get_current_device().compute_capability
     ptx = lib.get_asm_str(cc=cc)
 
