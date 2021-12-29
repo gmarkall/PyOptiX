@@ -4,12 +4,537 @@
 import optix
 import cupy  as cp    # CUDA bindings
 import numpy as np    # Packing of structures in C-compatible format
+import math
+from operator import mul
 
 import array
 import ctypes         # C interop helpers
 from PIL import Image, ImageOps # Image IO
 
-from numba import cuda
+from numba import cuda, types, float32, uint8
+from numba.cuda.cudadecl import register, register_global, register_attr
+from numba.cuda.cudaimpl import lower, lower_attr
+from numba.cuda.compiler import compile_cuda as numba_compile_cuda
+
+from numba.core.imputils import lower_constant
+from numba.core.typing.templates import AttributeTemplate, ConcreteTemplate, signature
+from numba.core.extending import register_model, models, typeof_impl, overload
+from numba.cuda.types import dim3
+
+#-------------------------------------------------------------------------------
+#
+# Numba extensions for general CUDA / OptiX support
+#
+#-------------------------------------------------------------------------------
+
+# UChar4
+# ------
+
+# Numba presently doesn't implement the UChar4 type (which is fairly standard
+# CUDA) so we provide some minimal support for it here.
+
+
+# Prototype a function to construct a uchar4
+
+def make_uchar4(x, y, z, w):
+    pass
+
+
+# UChar4 typing
+
+class UChar4(types.Type):
+    def __init__(self):
+        super().__init__(name="UChar4")
+
+
+uchar4 = UChar4()
+
+
+@register
+class MakeUChar4(ConcreteTemplate):
+    key = make_uchar4
+    cases = [signature(uchar4, types.uchar, types.uchar, types.uchar,
+                       types.uchar)]
+
+
+register_global(make_uchar4, types.Function(MakeUChar4))
+
+
+# UChar4 data model
+
+@register_model(UChar4)
+class Uchar4Model(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('x', types.uchar),
+            ('y', types.uchar),
+            ('z', types.uchar),
+            ('w', types.uchar),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+# UChar4 lowering
+
+@lower(make_uchar4, types.uchar, types.uchar, types.uchar, types.uchar)
+def lower_make_uchar4(context, builder, sig, args):
+    uc4 = cgutils.create_struct_proxy(uchar4)(context, builder)
+    uc4.x = args[0]
+    uc4.y = args[1]
+    uc4.z = args[2]
+    uc4.w = args[3]
+    return uc4._getvalue()
+
+
+
+
+# float3
+# ------
+
+# Float3 typing
+
+class Float3(types.Type):
+    def __init__(self):
+        super().__init__(name="Float3")
+
+
+float3 = Float3()
+
+
+# Float3 data model
+
+@register_model(Float3)
+class Float3Model(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('x', types.float32),
+            ('y', types.float32),
+            ('z', types.float32),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+# Prototype a function to construct a float3
+
+def make_float3(x, y, z):
+    pass
+
+
+@register
+class MakeFloat3(ConcreteTemplate):
+    key = make_float3
+    cases = [signature(float3, types.float32, types.float32, types.float32)]
+
+
+register_global(make_float3, types.Function(MakeFloat3))
+
+# make_float3 lowering
+
+@lower(make_float3, types.float32, types.float32, types.float32)
+def lower_make_float3(context, builder, sig, args):
+    f3 = cgutils.create_struct_proxy(float3)(context, builder)
+    f3.x = args[0]
+    f3.y = args[1]
+    f3.z = args[2]
+    return f3._getvalue()
+
+
+# float2
+# ------
+
+# Float2 typing
+
+class Float2(types.Type):
+    def __init__(self):
+        super().__init__(name="Float2")
+
+
+float2 = Float2()
+
+
+# Float2 data model
+
+@register_model(Float2)
+class Float2Model(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('x', types.float32),
+            ('y', types.float32),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+
+@register_attr
+class Float2_attrs(AttributeTemplate):
+    key = float2
+
+    def resolve_x(self, mod):
+        return types.float32
+
+    def resolve_y(self, mod):
+        return types.float32
+
+
+# Prototype a function to construct a float2
+
+def make_float2(x, y):
+    pass
+
+@register
+class MakeFloat2(ConcreteTemplate):
+    key = make_float2
+    cases = [signature(float2, types.float32, types.float32)]
+
+
+register_global(make_float2, types.Function(MakeFloat2))
+
+# make_float2 lowering
+
+@lower(make_float2, types.float32, types.float32)
+def lower_make_float2(context, builder, sig, args):
+    f2 = cgutils.create_struct_proxy(float2)(context, builder)
+    f2.x = args[0]
+    f2.y = args[1]
+    return f2._getvalue()
+
+
+
+# uint3
+# ------
+
+
+class UInt3(types.Type):
+    def __init__(self):
+        super().__init__(name="UInt3")
+
+
+uint3 = UInt3()
+
+# UInt3 data model
+
+@register_model(UInt3)
+class UInt3Model(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('x', types.uint32),
+            ('y', types.uint32),
+            ('z', types.uint32),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+@register_attr
+class UInt3_attrs(AttributeTemplate):
+    key = uint3
+
+    def resolve_x(self, mod):
+        return types.uint32
+
+    def resolve_y(self, mod):
+        return types.uint32
+
+    def resolve_z(self, mod):
+        return types.uint32
+
+# Prototype a function to construct a uint3
+
+def make_uint3(x, y, z):
+    pass
+
+@register
+class MakeUInt3(ConcreteTemplate):
+    key = make_uint3
+    cases = [signature(uint3, types.uint32, types.uint32, types.uint32)]
+
+
+register_global(make_uint3, types.Function(MakeUInt3))
+
+
+# make_uint3 lowering
+
+@lower(make_uint3, types.uint32, types.uint32, types.uint32)
+def lower_make_uint3(context, builder, sig, args):
+    # u4 = uint32
+    u4_3 = cgutils.create_struct_proxy(uint3)(context, builder)
+    u4_3.x = args[0]
+    u4_3.y = args[1]
+    u4_3.z = args[2]
+    return u4_3._getvalue()
+
+
+# Params
+# ------------
+
+
+# Structures as declared in triangle.h
+
+class ParamsStruct:
+    fields = (
+        ('image', 'uchar4*'),
+        ('image_width', 'unsigned int'),
+        ('image_height', 'unsigned int'),
+        ('cam_eye', 'float3'),
+        ('cam_u', 'float3'),
+        ('cam_v', 'float3'),
+        ('cam_w', 'float3'),
+        ('handle', 'OptixTraversableHandle'),
+    )
+
+class MissDataStruct:
+    fields = {
+        ('bg_color', 'float3')
+    }
+
+# "Declare" a global called params
+
+params = ParamsStruct()
+MissData = MissDataStruct()
+
+
+class Params(types.Type):
+    def __init__(self):
+        super().__init__(name='ParamsType')
+
+
+params_type = Params()
+
+# ParamsStruct typing
+
+@register_model(Params)
+class ParamsModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('image', types.CPointer(uchar4)),
+            ('image_width', types.uint32),
+            ('image_height', types.uint32),
+            ('cam_eye', float3),
+            ('cam_u', float3),
+            ('cam_v', float3),
+            ('cam_w', float3),
+            ('handle', types.uint64),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+
+# ParamsStruct data model
+
+@register_attr
+class Params_attrs(AttributeTemplate):
+    key = params_type
+
+    def resolve_image(self, mod):
+        return types.CPointer(uchar4)
+
+    def resolve_image_width(self, mod):
+        return types.uint32
+    
+    def resolve_image_height(self, mod):
+        return types.uint32
+    
+    def resolve_cam_eye(self, mod):
+        return float3
+    
+    def resolve_cam_u(self, mod):
+        return float3
+    
+    def resolve_cam_v(self, mod):
+        return float3
+    
+    def resolve_cam_w(self, mod):
+        return float3
+    
+    def resolve_handle(self, mod):
+        # typedef unsigned long long OptixTraversableHandle
+        return types.uint64
+
+
+@typeof_impl.register(ParamsStruct)
+def typeof_params(val, c):
+    return params_type
+
+
+# ParamsStruct lowering
+
+@lower_constant(Params)
+def constant_params(context, builder, ty, pyval):
+    try:
+        gvar = builder.module.get_global('params')
+    except KeyError:
+        llty = context.get_value_type(ty)
+        gvar = cgutils.add_global_variable(builder.module, llty, 'params',
+                                          addrspace=nvvm.ADDRSPACE_CONSTANT)
+        gvar.linkage = 'external'
+        gvar.global_constant = True
+
+    return builder.load(gvar)
+
+
+@lower_attr(Params, 'image')
+def params_image_width(context, builder, sig, arg):
+    return builder.extract_value(arg, 0)
+
+@lower_attr(Params, 'image_width')
+def params_image_width(context, builder, sig, arg):
+    return builder.extract_value(arg, 1)
+
+@lower_attr(Params, 'image_height')
+def params_image_height(context, builder, sig, arg):
+    return builder.extract_value(arg, 2)
+
+@lower_attr(Params, 'cam_eye')
+def params_cam_eye(context, builder, sig, arg):
+    return builder.extract_value(arg, 3)
+
+@lower_attr(Params, 'cam_u')
+def params_cam_eye(context, builder, sig, arg):
+    return builder.extract_value(arg, 4)
+
+@lower_attr(Params, 'cam_v')
+def params_cam_eye(context, builder, sig, arg):
+    return builder.extract_value(arg, 5)
+
+@lower_attr(Params, 'cam_w')
+def params_cam_eye(context, builder, sig, arg):
+    return builder.extract_value(arg, 6)
+
+@lower_attr(Params, 'handle')
+def params_cam_eye(context, builder, sig, arg):
+    return builder.extract_value(arg, 7)
+
+# OptiX types
+# -----------
+
+# typedefs
+# ------
+
+OptixVisibilityMask = types.uint32
+
+# Enum
+# ------
+
+OPTIX_RAY_FLAG_NONE = 0
+
+# OptiX types
+# -----------
+
+# Typing for OptiX types
+
+class SbtDataPointer(types.RawPointer):
+    def __init__(self):
+        super().__init__(name="SbtDataPointer")
+
+
+sbt_data_pointer = SbtDataPointer()
+
+
+# Models for OptiX types
+
+@register_model(SbtDataPointer)
+class SbtDataPointerModel(models.OpaqueModel):
+    pass
+
+
+# OptiX functions
+# ---------------
+
+# Here we "prototype" the OptiX functions that the user will call in their
+# kernels, so that Numba has something to refer to when compiling the kernel.
+
+def _optix_GetLaunchIndex():
+    pass
+
+def _optix_GetLaunchDimensions():
+    pass
+
+def _optix_GetSbtDataPointer():
+    pass
+
+
+# Monkey-patch the functions into the optix module, so the user can write
+# optix.GetLaunchIndex etc., for symmetry with the rest of the API implemented
+# in PyOptiX.
+
+optix.GetLaunchIndex = _optix_GetLaunchIndex
+optix.GetLaunchDimensions = _optix_GetLaunchDimensions
+optix.GetSbtDataPointer = _optix_GetSbtDataPointer
+
+
+# OptiX function typing
+
+@register
+class OptixGetLaunchIndex(ConcreteTemplate):
+    key = optix.GetLaunchIndex
+    cases = [signature(dim3)]
+
+@register
+class OptixGetLaunchDimensions(ConcreteTemplate):
+    key = optix.GetLaunchDimensions
+    cases = [signature(dim3)]
+
+@register
+class OptixGetSbtDataPointer(ConcreteTemplate):
+    key = optix.GetSbtDataPointer
+    cases = [signature(sbt_data_pointer)]
+
+
+@register_attr
+class OptixModuleTemplate(AttributeTemplate):
+    key = types.Module(optix)
+
+    def resolve_GetLaunchIndex(self, mod):
+        return types.Function(OptixGetLaunchIndex)
+
+    def resolve_GetLaunchDimensions(self, mod):
+        return types.Function(OptixGetLaunchDimensions)
+
+    def resolve_GetSbtDataPointer(self, mod):
+        return types.Function(OptixGetSbtDataPointer)
+
+
+# OptiX function lowering
+
+@lower(optix.GetLaunchIndex)
+def lower_optix_getLaunchIndex(context, builder, sig, args):
+    def get_launch_index(axis):
+        asm = ir.InlineAsm(ir.FunctionType(ir.IntType(32), []),
+                           f"call ($0), _optix_get_launch_index_{axis}, ();",
+                           "=r")
+        return builder.call(asm, [])
+
+    index = cgutils.create_struct_proxy(dim3)(context, builder)
+    index.x = get_launch_index('x')
+    index.y = get_launch_index('y')
+    index.z = get_launch_index('z')
+    return index._getvalue()
+
+
+@lower(optix.GetLaunchDimensions)
+def lower_optix_getLaunchDimensions(context, builder, sig, args):
+    def get_launch_dimensions(axis):
+        asm = ir.InlineAsm(ir.FunctionType(ir.IntType(32), []),
+                           f"call ($0), _optix_get_launch_dimension_{axis}, ();",
+                           "=r")
+        return builder.call(asm, [])
+
+    index = cgutils.create_struct_proxy(dim3)(context, builder)
+    index.x = get_launch_dimensions('x')
+    index.y = get_launch_dimensions('y')
+    index.z = get_launch_dimensions('z')
+    return index._getvalue()
+
+
+@lower(optix.GetSbtDataPointer)
+def lower_optix_getSbtDataPointer(context, builder, sig, args):
+    asm = ir.InlineAsm(ir.FunctionType(ir.IntType(64), []),
+                       f"call ($0), _optix_get_sbt_data_ptr_64, ();",
+                       "=l")
+    ptr = builder.call(asm, [])
+    ptr = builder.inttoptr(ptr, ir.IntType(8).as_pointer())
+    return ptr
+
+
 
 #-------------------------------------------------------------------------------
 #
@@ -427,15 +952,95 @@ def compile_numba(f, sig=(), debug=False):
     return ptx.replace(mangled_name, original_name)
 
 
+#-------------------------------------------------------------------------------
+#
+# User code / kernel - the following section is what we'd expect a user of
+# PyOptiX to write.
+#
+#-------------------------------------------------------------------------------
 
-# CUDA Python code
+# vec_math
+
+# Overload for Clamp
+def clamp(x, a, b):
+    pass
+
+@overload(clamp, target="cuda")
+def jit_clamp(x, a, b):
+    if isinstance(x, types.Float):
+        def clamp_float_impl(x, a, b):
+            return max(a, min(x, b))
+    elif isinstance(x, float3):
+        def clamp_float3_impl(x, a, b):
+            return make_float3(clamp(x.x, a, b), clamp(x.y, a, b), clamp(x.z, a, b))
+
+@cuda.jit(device=True)
+def dot(a, b):
+    pass
+
+@overload(dot, target="cuda")
+def jit_dot(a, b):
+    if isinstance(a, float3) and isinstance(b, float3):
+        def dot_float3_impl(a, b):
+            return a.x * b.x + a.y * b.y + a.z * b.z
+        return dot_float3_impl
+
+@overload(mul, target="cuda")
+def jit_mul(a, b):
+    if isinstance(a, Float3) and isinstance(b, (types.Integer, types.Float)):
+        def jit_float3_scalar(a, b):
+            return make_float3(a.x * b, a.y * b, a.z * b)
+        return jit_float3_scalar
+    elif isinstance(a, (types.Integer, types.Float)) and isinstance(b, Float3):
+        def jit_scalar_float3(a, b):
+            return make_float3(a * b.x, a * b.y, a * b.z)
+        return jit_scalar_float3
+    elif isinstance(a, Float2) and isinstance(b, (types.Integer, types.Float)):
+        def jit_float2_scalar(a, b):
+            return make_float2(a.x * b, a.y * b)
+        return jit_float2_scalar
+    elif isinstance(a, (types.Integer, types.Float)) and isinstance(b, Float2):
+        def jit_scalar_float2(a, b):
+            return make_float2(a * b.x, a * b.y)
+        return jit_scalar_float2
+
+@cuda.jit(device=True)
+def normalize(v):
+    invLen = float32(1.0) / math.sqrt(dot(v, v))
+    return v * invLen
+
+
+# Helpers
+
+@cuda.jit(device=True)
+def toSRGB(c):
+    # Use float32 for constants
+    invGamma = float32(1.0) / float32(2.4)
+    powed = make_float3(math.pow(c.x, invGamma), math.pow(c.x, invGamma), math.pow(c.x, invGamma))
+    return make_float3(
+        float32(12.92) * c.x if c.x < float32(0.0031308) else float32(1.055) * powed.x - float32(0.055),
+        float32(12.92) * c.y if c.y < float32(0.0031308) else float32(1.055) * powed.y - float32(0.055),
+        float32(12.92) * c.z if c.z < float32(0.0031308) else float32(1.055) * powed.z - float32(0.055))
+
+
+@cuda.jit(device=True)
+def quantizeUnsigned8Bits(x):
+    x = clamp( x, float32(0.0), float32(1.0) )
+    N, Np1 = 1 << 8 - 1, 1 << 8 # compile-time integer constant ?
+    return uint8(min(uint8(x * float32(Np1)), uint8(N)))
+
+@cuda.jit(device=True)
+def make_color(c):
+    srgb = toSRGB(clamp(c, float32(0.0), float32(1.0)))
+    return make_uchar4(quantizeUnsigned8Bits(srgb.x), quantizeUnsigned8Bits(srgb.y), quantizeUnsigned8Bits(srgb.z), uint8(255))
+
+# ray functions
 
 @cuda.jit(device=True)
 def setPayload(p):
     optix.SetPayload_0(float_as_int(p.x))
     optix.SetPayload_1(float_as_int(p.y))
     optix.SetPayload_2(float_as_int(p.z))
-
 
 @cuda.jit(device=True)
 def computeRay(idx, dim, origin, direction):
@@ -451,7 +1056,6 @@ def computeRay(idx, dim, origin, direction):
     direction[0] = normalize(d.x * U + d.y * V + W)
 
 
-@cuda.jit
 def __raygen__rg():
     # Lookup our location within the launch grid
     idx = optix.GetLaunchIndex()
@@ -459,12 +1063,12 @@ def __raygen__rg():
 
     # Map our launch idx to a screen location and create a ray from the camera
     # location through the screen
-    ray_origin = cuda.local.arrary(1, float3)
+    ray_origin = cuda.local.array(1, float3)
     ray_direction = cuda.local.array(1, float3)
     computeRay(make_uint3(idx.x, idx.y, 0), dim, ray_origin, ray_direction)
 
     # Trace the ray against our scene hierarchy
-    result = make_float3(0);
+    result = make_float3(0)
     p0 = cuda.local.array(1, types.int32)
     p1 = cuda.local.array(1, types.int32)
     p2 = cuda.local.array(1, types.int32)
@@ -481,12 +1085,12 @@ def __raygen__rg():
             1,                          # SBT stride   -- See SBT discussion
             0,                          # missSBTIndex -- See SBT discussion
             p0, p1, p2)
-    result.x = int_as_float(p0);
-    result.y = int_as_float(p1);
-    result.z = int_as_float(p2);
+    result.x = float32(p0)
+    result.y = float32(p1)
+    result.z = float32(p2)
 
     # Record results in our output raster
-    params.image[idx.y * params.image_width + idx.x] = make_color( result );
+    params.image[idx.y * params.image_width + idx.x] = make_color( result )
 
 
 @cuda.jit
@@ -512,8 +1116,8 @@ def __closesthit__ch():
 
 
 def main():
-    #numba_ptx = compile_numba(__raygen__rg)
-    triangle_ptx = compile_cuda( "examples/triangle.cu" )
+    triangle_ptx = compile_numba(__raygen__rg)
+    # triangle_ptx = compile_cuda( "examples/triangle.cu" )
     print(triangle_ptx)
 
     init_optix()
