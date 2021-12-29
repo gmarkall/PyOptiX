@@ -5,7 +5,7 @@ import optix
 import cupy  as cp    # CUDA bindings
 import numpy as np    # Packing of structures in C-compatible format
 import math
-from operator import mul
+from operator import mul, sub, add
 
 import array
 import ctypes         # C interop helpers
@@ -114,6 +114,82 @@ class Float3Model(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
+@register_global(mul)
+class Float3_mul(ConcreteTemplate):
+    cases = [
+        signature(float3, types.float32, float3),
+        signature(float3, float3, types.float32),
+        signature(float3, float3, float3)
+    ]
+
+@lower(mul, float3, types.float32)
+def float3_mul_scalar(context, builder, sig, args):
+    f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
+    s = builder.extract_value(args, 1)
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fmul(f3.x, s)
+    res.y = builder.fmul(f3.y, s)
+    res.z = builder.fmul(f3.z, s)
+    return res._getvalue()
+
+@lower(mul, types.float32, float3)
+def scalar_mul_float2(context, builder, sig, args):
+    s = builder.extract_value(args, 0)
+    f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fmul(f3.x, s)
+    res.y = builder.fmul(f3.y, s)
+    res.z = builder.fmul(f3.z, s)
+    return res._getvalue()
+
+@lower(mul, float3, float3)
+def float3_mul_float3(context, builder, sig, args):
+    f3_0 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
+    f3_1 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fmul(f3_0.x, f3_1.x)
+    res.y = builder.fmul(f3_0.y, f3_1.y)
+    res.z = builder.fmul(f3_0.z, f3_1.z)
+    return res._getvalue()
+
+@register_global(add)
+class Float3_add(ConcreteTemplate):
+    cases = [
+        signature(float3, types.float32, float3),
+        signature(float3, float3, types.float32),
+        signature(float3, float3, float3)
+    ]
+
+@lower(add, float3, types.float32)
+def float3_add_scalar(context, builder, sig, args):
+    f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
+    s = builder.extract_value(args, 1)
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fadd(f3.x, s)
+    res.y = builder.fadd(f3.y, s)
+    res.z = builder.fadd(f3.z, s)
+    return res._getvalue()
+
+@lower(add, types.float32, float3)
+def scalar_add_float2(context, builder, sig, args):
+    s = builder.extract_value(args, 0)
+    f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fadd(f3.x, s)
+    res.y = builder.fadd(f3.y, s)
+    res.z = builder.fadd(f3.z, s)
+    return res._getvalue()
+
+@lower(add, float3, float3)
+def float3_add_float3(context, builder, sig, args):
+    f3_0 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
+    f3_1 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fadd(f3_0.x, f3_1.x)
+    res.y = builder.fadd(f3_0.y, f3_1.y)
+    res.z = builder.fadd(f3_0.z, f3_1.z)
+    return res._getvalue()
+
 # Prototype a function to construct a float3
 
 def make_float3(x, y, z):
@@ -164,7 +240,6 @@ class Float2Model(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
-
 @register_attr
 class Float2_attrs(AttributeTemplate):
     key = float2
@@ -175,6 +250,76 @@ class Float2_attrs(AttributeTemplate):
     def resolve_y(self, mod):
         return types.float32
 
+
+@register_global(mul)
+class Float2_mul(ConcreteTemplate):
+    cases = [
+        signature(float2, types.float32, float2),
+        signature(float2, float2, types.float32),
+        signature(float2, float2, float2)
+    ]
+
+@lower(mul, float2, types.float32)
+def float2_mul_scalar(context, builder, sig, args):
+    f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
+    s = builder.extract_value(args, 1)
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fmul(f2.x, s)
+    res.y = builder.fmul(f2.y, s)
+    return res._getvalue()
+
+@lower(mul, types.float32, float2)
+def scalar_mul_float2(context, builder, sig, args):
+    s = builder.extract_value(args, 0)
+    f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fmul(f2.x, s)
+    res.y = builder.fmul(f2.y, s)
+    return res._getvalue()
+
+@lower(mul, float2, float2)
+def float2_mul_float2(context, builder, sig, args):
+    f2_0 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
+    f2_1 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fmul(f2_0.x, f2_1.x)
+    res.y = builder.fmul(f2_0.y, f2_1.y)
+    return res._getvalue()
+
+@register_global(sub)
+class Float2_sub(ConcreteTemplate):
+    cases = [
+        signature(float2, types.float32, float2),
+        signature(float2, float2, types.float32),
+        signature(float2, float2, float2)
+    ]
+
+@lower(sub, float2, types.float32)
+def float2_sub_scalar(context, builder, sig, args):
+    f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
+    s = builder.extract_value(args, 1)
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fsub(f2.x, s)
+    res.y = builder.fsub(f2.y, s)
+    return res._getvalue()
+
+@lower(sub, types.float32, float2)
+def scalar_sub_float2(context, builder, sig, args):
+    s = builder.extract_value(args, 0)
+    f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fsub(s, f2.x)
+    res.y = builder.fsub(s, f2.y)
+    return res._getvalue()
+
+@lower(sub, float2, float2)
+def float2_sub_float2(context, builder, sig, args):
+    f2_0 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
+    f2_1 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fsub(f2_0.x, f2_1.x)
+    res.y = builder.fsub(f2_0.y, f2_1.y)
+    return res._getvalue()
 
 # Prototype a function to construct a float2
 
@@ -970,9 +1115,11 @@ def jit_clamp(x, a, b):
     if isinstance(x, types.Float):
         def clamp_float_impl(x, a, b):
             return max(a, min(x, b))
+        return clamp_float_impl
     elif isinstance(x, float3):
         def clamp_float3_impl(x, a, b):
             return make_float3(clamp(x.x, a, b), clamp(x.y, a, b), clamp(x.z, a, b))
+        return clamp_float3_impl
 
 @cuda.jit(device=True)
 def dot(a, b):
@@ -985,24 +1132,6 @@ def jit_dot(a, b):
             return a.x * b.x + a.y * b.y + a.z * b.z
         return dot_float3_impl
 
-@overload(mul, target="cuda")
-def jit_mul(a, b):
-    if isinstance(a, Float3) and isinstance(b, (types.Integer, types.Float)):
-        def jit_float3_scalar(a, b):
-            return make_float3(a.x * b, a.y * b, a.z * b)
-        return jit_float3_scalar
-    elif isinstance(a, (types.Integer, types.Float)) and isinstance(b, Float3):
-        def jit_scalar_float3(a, b):
-            return make_float3(a * b.x, a * b.y, a * b.z)
-        return jit_scalar_float3
-    elif isinstance(a, Float2) and isinstance(b, (types.Integer, types.Float)):
-        def jit_float2_scalar(a, b):
-            return make_float2(a.x * b, a.y * b)
-        return jit_float2_scalar
-    elif isinstance(a, (types.Integer, types.Float)) and isinstance(b, Float2):
-        def jit_scalar_float2(a, b):
-            return make_float2(a * b.x, a * b.y)
-        return jit_scalar_float2
 
 @cuda.jit(device=True)
 def normalize(v):
