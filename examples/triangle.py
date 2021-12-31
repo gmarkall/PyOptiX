@@ -124,13 +124,13 @@ make_attribute_wrapper(Float3, 'x', 'x')
 make_attribute_wrapper(Float3, 'y', 'y')
 make_attribute_wrapper(Float3, 'z', 'z')
 
-# @lower_cast(types.Float, float3)
-# def float_to_float3_cast(context, builder, fromty, toty, val):
-#     f3 = cgutils.create_struct_proxy(float3)(context, builder)
-#     f3.x = val
-#     f3.y = val
-#     f3.z = val
-#     return f3._get_value()
+@lower_cast(types.Float, float3)
+def float_to_float3_cast(context, builder, fromty, toty, val):
+    f3 = cgutils.create_struct_proxy(float3)(context, builder)
+    f3.x = val
+    f3.y = val
+    f3.z = val
+    return f3._get_value()
 
 
 @register_global(mul)
@@ -221,31 +221,20 @@ class Float2Model(models.StructModel):
 make_attribute_wrapper(Float2, 'x', 'x')
 make_attribute_wrapper(Float2, 'y', 'y')
 
+@lower_cast(types.Float, float2)
+def float_to_float2_cast(context, builder, fromty, toty, val):
+    f2 = cgutils.create_struct_proxy(float2)(context, builder)
+    f2.x = val
+    f2.y = val
+    return f2._get_value()
+
+
+
 @register_global(mul)
 class Float2_mul(ConcreteTemplate):
     cases = [
-        signature(float2, types.float32, float2),
-        signature(float2, float2, types.float32),
         signature(float2, float2, float2)
     ]
-
-@lower(mul, float2, types.float32)
-def float2_mul_scalar(context, builder, sig, args):
-    f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-    s = args[1]
-    res = cgutils.create_struct_proxy(float2)(context, builder)
-    res.x = builder.fmul(f2.x, s)
-    res.y = builder.fmul(f2.y, s)
-    return res._getvalue()
-
-@lower(mul, types.float32, float2)
-def scalar_mul_float2(context, builder, sig, args):
-    s = args[0]
-    f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
-    res = cgutils.create_struct_proxy(float2)(context, builder)
-    res.x = builder.fmul(f2.x, s)
-    res.y = builder.fmul(f2.y, s)
-    return res._getvalue()
 
 @lower(mul, float2, float2)
 def float2_mul_float2(context, builder, sig, args):
@@ -259,28 +248,8 @@ def float2_mul_float2(context, builder, sig, args):
 @register_global(sub)
 class Float2_sub(ConcreteTemplate):
     cases = [
-        signature(float2, types.float32, float2),
-        signature(float2, float2, types.float32),
         signature(float2, float2, float2)
     ]
-
-@lower(sub, float2, types.float32)
-def float2_sub_scalar(context, builder, sig, args):
-    f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-    s = args[1]
-    res = cgutils.create_struct_proxy(float2)(context, builder)
-    res.x = builder.fsub(f2.x, s)
-    res.y = builder.fsub(f2.y, s)
-    return res._getvalue()
-
-@lower(sub, types.float32, float2)
-def scalar_sub_float2(context, builder, sig, args):
-    s = args[0]
-    f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
-    res = cgutils.create_struct_proxy(float2)(context, builder)
-    res.x = builder.fsub(s, f2.x)
-    res.y = builder.fsub(s, f2.y)
-    return res._getvalue()
 
 @lower(sub, float2, float2)
 def float2_sub_float2(context, builder, sig, args):
