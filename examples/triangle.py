@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 
 
-import optix
-import cupy  as cp    # CUDA bindings
-import numpy as np    # Packing of structures in C-compatible format
-import math
-from operator import mul, sub, add
-
 import array
-import ctypes         # C interop helpers
-from PIL import Image, ImageOps # Image IO
+import ctypes  # C interop helpers
+import math
+from operator import add, mul, sub
 
-from numba import cuda, types, float32, uint8
-from numba.cuda.cudadecl import register, register_global, register_attr
-from numba.cuda.cudaimpl import lower, lower_attr
+import cupy as cp  # CUDA bindings
+import numpy as np  # Packing of structures in C-compatible format
+import optix
+from numba import cuda, float32, types, uint8
+from numba.core import cgutils
+from numba.core.extending import (make_attribute_wrapper, models, overload,
+                                  register_model, typeof_impl)
+from numba.core.imputils import lower_constant, lower_cast
+from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
+                                         signature)
 from numba.cuda.compiler import compile_cuda as numba_compile_cuda
-
-from numba.core.imputils import lower_constant
-from numba.core.typing.templates import AttributeTemplate, ConcreteTemplate, signature
-from numba.core.extending import register_model, models, typeof_impl, overload
+from numba.cuda.cudadecl import register, register_attr, register_global
+from numba.cuda.cudadrv import nvvm
+from numba.cuda.cudaimpl import lower, lower_attr
 from numba.cuda.types import dim3
+from PIL import Image, ImageOps  # Image IO
 
 #-------------------------------------------------------------------------------
 #
@@ -74,6 +76,11 @@ class Uchar4Model(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
+make_attribute_wrapper(Uchar4, 'x', 'x')
+make_attribute_wrapper(Uchar4, 'y', 'y')
+make_attribute_wrapper(Uchar4, 'z', 'z')
+make_attribute_wrapper(Uchar4, 'w', 'w')
+
 # UChar4 lowering
 
 @lower(make_uchar4, types.uchar, types.uchar, types.uchar, types.uchar)
@@ -113,6 +120,10 @@ class Float3Model(models.StructModel):
         ]
         super().__init__(dmm, fe_type, members)
 
+make_attribute_wrapper(Float3, 'x', 'x')
+make_attribute_wrapper(Float3, 'y', 'y')
+make_attribute_wrapper(Float3, 'z', 'z')
+
 
 @register_global(mul)
 class Float3_mul(ConcreteTemplate):
@@ -125,7 +136,7 @@ class Float3_mul(ConcreteTemplate):
 @lower(mul, float3, types.float32)
 def float3_mul_scalar(context, builder, sig, args):
     f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
-    s = builder.extract_value(args, 1)
+    s = args[1]
     res = cgutils.create_struct_proxy(float3)(context, builder)
     res.x = builder.fmul(f3.x, s)
     res.y = builder.fmul(f3.y, s)
@@ -134,7 +145,7 @@ def float3_mul_scalar(context, builder, sig, args):
 
 @lower(mul, types.float32, float3)
 def scalar_mul_float2(context, builder, sig, args):
-    s = builder.extract_value(args, 0)
+    s = args[0]
     f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
     res = cgutils.create_struct_proxy(float3)(context, builder)
     res.x = builder.fmul(f3.x, s)
@@ -240,16 +251,8 @@ class Float2Model(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
-@register_attr
-class Float2_attrs(AttributeTemplate):
-    key = float2
-
-    def resolve_x(self, mod):
-        return types.float32
-
-    def resolve_y(self, mod):
-        return types.float32
-
+make_attribute_wrapper(Float2, 'x', 'x')
+make_attribute_wrapper(Float2, 'y', 'y')
 
 @register_global(mul)
 class Float2_mul(ConcreteTemplate):
@@ -262,7 +265,7 @@ class Float2_mul(ConcreteTemplate):
 @lower(mul, float2, types.float32)
 def float2_mul_scalar(context, builder, sig, args):
     f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-    s = builder.extract_value(args, 1)
+    s = args[1]
     res = cgutils.create_struct_proxy(float2)(context, builder)
     res.x = builder.fmul(f2.x, s)
     res.y = builder.fmul(f2.y, s)
@@ -270,7 +273,7 @@ def float2_mul_scalar(context, builder, sig, args):
 
 @lower(mul, types.float32, float2)
 def scalar_mul_float2(context, builder, sig, args):
-    s = builder.extract_value(args, 0)
+    s = args[0]
     f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
     res = cgutils.create_struct_proxy(float2)(context, builder)
     res.x = builder.fmul(f2.x, s)
@@ -297,7 +300,7 @@ class Float2_sub(ConcreteTemplate):
 @lower(sub, float2, types.float32)
 def float2_sub_scalar(context, builder, sig, args):
     f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-    s = builder.extract_value(args, 1)
+    s = args[1]
     res = cgutils.create_struct_proxy(float2)(context, builder)
     res.x = builder.fsub(f2.x, s)
     res.y = builder.fsub(f2.y, s)
@@ -305,7 +308,7 @@ def float2_sub_scalar(context, builder, sig, args):
 
 @lower(sub, types.float32, float2)
 def scalar_sub_float2(context, builder, sig, args):
-    s = builder.extract_value(args, 0)
+    s = args[0]
     f2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
     res = cgutils.create_struct_proxy(float2)(context, builder)
     res.x = builder.fsub(s, f2.x)
@@ -368,19 +371,9 @@ class UInt3Model(models.StructModel):
         ]
         super().__init__(dmm, fe_type, members)
 
-
-@register_attr
-class UInt3_attrs(AttributeTemplate):
-    key = uint3
-
-    def resolve_x(self, mod):
-        return types.uint32
-
-    def resolve_y(self, mod):
-        return types.uint32
-
-    def resolve_z(self, mod):
-        return types.uint32
+make_attribute_wrapper(UInt3, 'x', 'x')
+make_attribute_wrapper(UInt3, 'y', 'y')
+make_attribute_wrapper(UInt3, 'z', 'z')
 
 # Prototype a function to construct a uint3
 
@@ -444,7 +437,7 @@ class Params(types.Type):
 
 params_type = Params()
 
-# ParamsStruct typing
+# ParamsStruct data model
 
 @register_model(Params)
 class ParamsModel(models.StructModel):
@@ -462,37 +455,14 @@ class ParamsModel(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
-
-# ParamsStruct data model
-
-@register_attr
-class Params_attrs(AttributeTemplate):
-    key = params_type
-
-    def resolve_image(self, mod):
-        return types.CPointer(uchar4)
-
-    def resolve_image_width(self, mod):
-        return types.uint32
-    
-    def resolve_image_height(self, mod):
-        return types.uint32
-    
-    def resolve_cam_eye(self, mod):
-        return float3
-    
-    def resolve_cam_u(self, mod):
-        return float3
-    
-    def resolve_cam_v(self, mod):
-        return float3
-    
-    def resolve_cam_w(self, mod):
-        return float3
-    
-    def resolve_handle(self, mod):
-        # typedef unsigned long long OptixTraversableHandle
-        return types.uint64
+make_attribute_wrapper(Params, 'image', 'image')
+make_attribute_wrapper(Params, 'image_width', 'image_width')
+make_attribute_wrapper(Params, 'image_height', 'image_height')
+make_attribute_wrapper(Params, 'cam_eye', 'cam_eye')
+make_attribute_wrapper(Params, 'cam_u', 'cam_u')
+make_attribute_wrapper(Params, 'cam_v', 'cam_v')
+make_attribute_wrapper(Params, 'cam_w', 'cam_w')
+make_attribute_wrapper(Params, 'handle', 'handle')
 
 
 @typeof_impl.register(ParamsStruct)
@@ -515,38 +485,6 @@ def constant_params(context, builder, ty, pyval):
 
     return builder.load(gvar)
 
-
-@lower_attr(Params, 'image')
-def params_image_width(context, builder, sig, arg):
-    return builder.extract_value(arg, 0)
-
-@lower_attr(Params, 'image_width')
-def params_image_width(context, builder, sig, arg):
-    return builder.extract_value(arg, 1)
-
-@lower_attr(Params, 'image_height')
-def params_image_height(context, builder, sig, arg):
-    return builder.extract_value(arg, 2)
-
-@lower_attr(Params, 'cam_eye')
-def params_cam_eye(context, builder, sig, arg):
-    return builder.extract_value(arg, 3)
-
-@lower_attr(Params, 'cam_u')
-def params_cam_eye(context, builder, sig, arg):
-    return builder.extract_value(arg, 4)
-
-@lower_attr(Params, 'cam_v')
-def params_cam_eye(context, builder, sig, arg):
-    return builder.extract_value(arg, 5)
-
-@lower_attr(Params, 'cam_w')
-def params_cam_eye(context, builder, sig, arg):
-    return builder.extract_value(arg, 6)
-
-@lower_attr(Params, 'handle')
-def params_cam_eye(context, builder, sig, arg):
-    return builder.extract_value(arg, 7)
 
 # OptiX types
 # -----------
@@ -1121,13 +1059,13 @@ def jit_clamp(x, a, b):
             return make_float3(clamp(x.x, a, b), clamp(x.y, a, b), clamp(x.z, a, b))
         return clamp_float3_impl
 
-@cuda.jit(device=True)
+
 def dot(a, b):
     pass
 
 @overload(dot, target="cuda")
 def jit_dot(a, b):
-    if isinstance(a, float3) and isinstance(b, float3):
+    if isinstance(a, Float3) and isinstance(b, Float3):
         def dot_float3_impl(a, b):
             return a.x * b.x + a.y * b.y + a.z * b.z
         return dot_float3_impl
@@ -1173,15 +1111,15 @@ def setPayload(p):
 
 @cuda.jit(device=True)
 def computeRay(idx, dim, origin, direction):
-    U = params.cam_u;
-    V = params.cam_v;
-    W = params.cam_w;
+    U = params.cam_u
+    V = params.cam_v
+    W = params.cam_w
     d = types.float32(2.0) * make_float2(
             types.float32(idx.x) / types.float32(dim.x),
             types.float32(idx.y) / types.float32(dim.y)
         ) - types.float32(1.0)
 
-    origin[0] = params.cam_eye;
+    origin[0] = params.cam_eye
     direction[0] = normalize(d.x * U + d.y * V + W)
 
 
@@ -1247,7 +1185,7 @@ def __closesthit__ch():
 def main():
     triangle_ptx = compile_numba(__raygen__rg)
     # triangle_ptx = compile_cuda( "examples/triangle.cu" )
-    print(triangle_ptx)
+    # print(triangle_ptx)
 
     init_optix()
 
