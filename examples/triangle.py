@@ -65,7 +65,7 @@ register_global(make_uchar4, types.Function(MakeUChar4))
 # UChar4 data model
 
 @register_model(UChar4)
-class Uchar4Model(models.StructModel):
+class UChar4Model(models.StructModel):
     def __init__(self, dmm, fe_type):
         members = [
             ('x', types.uchar),
@@ -76,10 +76,10 @@ class Uchar4Model(models.StructModel):
         super().__init__(dmm, fe_type, members)
 
 
-make_attribute_wrapper(Uchar4, 'x', 'x')
-make_attribute_wrapper(Uchar4, 'y', 'y')
-make_attribute_wrapper(Uchar4, 'z', 'z')
-make_attribute_wrapper(Uchar4, 'w', 'w')
+make_attribute_wrapper(UChar4, 'x', 'x')
+make_attribute_wrapper(UChar4, 'y', 'y')
+make_attribute_wrapper(UChar4, 'z', 'z')
+make_attribute_wrapper(UChar4, 'w', 'w')
 
 # UChar4 lowering
 
@@ -124,34 +124,20 @@ make_attribute_wrapper(Float3, 'x', 'x')
 make_attribute_wrapper(Float3, 'y', 'y')
 make_attribute_wrapper(Float3, 'z', 'z')
 
+# @lower_cast(types.Float, float3)
+# def float_to_float3_cast(context, builder, fromty, toty, val):
+#     f3 = cgutils.create_struct_proxy(float3)(context, builder)
+#     f3.x = val
+#     f3.y = val
+#     f3.z = val
+#     return f3._get_value()
+
 
 @register_global(mul)
 class Float3_mul(ConcreteTemplate):
     cases = [
-        signature(float3, types.float32, float3),
-        signature(float3, float3, types.float32),
         signature(float3, float3, float3)
     ]
-
-@lower(mul, float3, types.float32)
-def float3_mul_scalar(context, builder, sig, args):
-    f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
-    s = args[1]
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fmul(f3.x, s)
-    res.y = builder.fmul(f3.y, s)
-    res.z = builder.fmul(f3.z, s)
-    return res._getvalue()
-
-@lower(mul, types.float32, float3)
-def scalar_mul_float2(context, builder, sig, args):
-    s = args[0]
-    f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fmul(f3.x, s)
-    res.y = builder.fmul(f3.y, s)
-    res.z = builder.fmul(f3.z, s)
-    return res._getvalue()
 
 @lower(mul, float3, float3)
 def float3_mul_float3(context, builder, sig, args):
@@ -171,25 +157,6 @@ class Float3_add(ConcreteTemplate):
         signature(float3, float3, float3)
     ]
 
-@lower(add, float3, types.float32)
-def float3_add_scalar(context, builder, sig, args):
-    f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
-    s = builder.extract_value(args, 1)
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fadd(f3.x, s)
-    res.y = builder.fadd(f3.y, s)
-    res.z = builder.fadd(f3.z, s)
-    return res._getvalue()
-
-@lower(add, types.float32, float3)
-def scalar_add_float2(context, builder, sig, args):
-    s = builder.extract_value(args, 0)
-    f3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fadd(f3.x, s)
-    res.y = builder.fadd(f3.y, s)
-    res.z = builder.fadd(f3.z, s)
-    return res._getvalue()
 
 @lower(add, float3, float3)
 def float3_add_float3(context, builder, sig, args):
