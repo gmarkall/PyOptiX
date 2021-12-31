@@ -124,49 +124,27 @@ make_attribute_wrapper(Float3, 'x', 'x')
 make_attribute_wrapper(Float3, 'y', 'y')
 make_attribute_wrapper(Float3, 'z', 'z')
 
-@lower_cast(types.Float, float3)
-def float_to_float3_cast(context, builder, fromty, toty, val):
-    f3 = cgutils.create_struct_proxy(float3)(context, builder)
-    f3.x = val
-    f3.y = val
-    f3.z = val
-    return f3._get_value()
+def lower_float3_ops(op):
+    def float3_op_impl(context, builder, sig, args):
+        def op_attr(lhs, rhs, res, attr):
+            setattr(res, attr, context.compile_internal(
+                builder,
+                lambda x, y: op(x, y),
+                signature(types.float32, types.float32, types.float32),
+                (getattr(lhs, attr), getattr(rhs, attr))
+            ))
+        lf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
+        rf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
+        res = cgutils.create_struct_proxy(float3)(context, builder)
+        op_attr(lf3, rf3, res, 'x')
+        op_attr(lf3, rf3, res, 'y')
+        op_attr(lf3, rf3, res, 'z')
+        return res._getvalue()    
 
+    lower(op, float3, float3)(float3_op_impl)
 
-@register_global(mul)
-class Float3_mul(ConcreteTemplate):
-    cases = [
-        signature(float3, float3, float3)
-    ]
-
-@lower(mul, float3, float3)
-def float3_mul_float3(context, builder, sig, args):
-    f3_0 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
-    f3_1 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fmul(f3_0.x, f3_1.x)
-    res.y = builder.fmul(f3_0.y, f3_1.y)
-    res.z = builder.fmul(f3_0.z, f3_1.z)
-    return res._getvalue()
-
-@register_global(add)
-class Float3_add(ConcreteTemplate):
-    cases = [
-        signature(float3, types.float32, float3),
-        signature(float3, float3, types.float32),
-        signature(float3, float3, float3)
-    ]
-
-
-@lower(add, float3, float3)
-def float3_add_float3(context, builder, sig, args):
-    f3_0 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
-    f3_1 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fadd(f3_0.x, f3_1.x)
-    res.y = builder.fadd(f3_0.y, f3_1.y)
-    res.z = builder.fadd(f3_0.z, f3_1.z)
-    return res._getvalue()
+lower_float3_ops(mul)
+lower_float3_ops(add)
 
 # Prototype a function to construct a float3
 
@@ -229,36 +207,26 @@ def float_to_float2_cast(context, builder, fromty, toty, val):
     return f2._get_value()
 
 
+def lower_float2_ops(op):
+    def float2_op_impl(context, builder, sig, args):
+        def op_attr(lhs, rhs, res, attr):
+            setattr(res, attr, context.compile_internal(
+                builder,
+                lambda x, y: op(x, y),
+                signature(types.float32, types.float32, types.float32),
+                (getattr(lhs, attr), getattr(rhs, attr))
+            ))
+        lf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
+        rf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
+        res = cgutils.create_struct_proxy(float2)(context, builder)
+        op_attr(lf2, rf2, res, 'x')
+        op_attr(lf2, rf2, res, 'y')
+        return res._getvalue()    
 
-@register_global(mul)
-class Float2_mul(ConcreteTemplate):
-    cases = [
-        signature(float2, float2, float2)
-    ]
+    lower(op, float2, float2)(float2_op_impl)
 
-@lower(mul, float2, float2)
-def float2_mul_float2(context, builder, sig, args):
-    f2_0 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-    f2_1 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
-    res = cgutils.create_struct_proxy(float2)(context, builder)
-    res.x = builder.fmul(f2_0.x, f2_1.x)
-    res.y = builder.fmul(f2_0.y, f2_1.y)
-    return res._getvalue()
-
-@register_global(sub)
-class Float2_sub(ConcreteTemplate):
-    cases = [
-        signature(float2, float2, float2)
-    ]
-
-@lower(sub, float2, float2)
-def float2_sub_float2(context, builder, sig, args):
-    f2_0 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-    f2_1 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
-    res = cgutils.create_struct_proxy(float2)(context, builder)
-    res.x = builder.fsub(f2_0.x, f2_1.x)
-    res.y = builder.fsub(f2_0.y, f2_1.y)
-    return res._getvalue()
+lower_float2_ops(mul)
+lower_float2_ops(sub)
 
 # Prototype a function to construct a float2
 
