@@ -5,6 +5,7 @@ import array
 import ctypes  # C interop helpers
 import math
 from operator import add, mul, sub
+from enum import Enum
 
 import cupy as cp  # CUDA bindings
 import numpy as np  # Packing of structures in C-compatible format
@@ -396,12 +397,24 @@ def constant_params(context, builder, ty, pyval):
 # typedefs
 # ------
 
-OptixVisibilityMask = types.uint32
+OptixVisibilityMask = types.Integer('OptixVisibilityMask', bitwidth=32, signed=False)
 
 # Enum
 # ------
 
 OPTIX_RAY_FLAG_NONE = 0
+# class OptixRayFlags(Enum):
+#     OPTIX_RAY_FLAG_NONE = 0
+#     OPTIX_RAY_FLAG_DISABLE_ANYHIT = 1 << 0
+#     OPTIX_RAY_FLAG_ENFORCE_ANYHIT = 1 << 1
+#     OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT = 1 << 2
+#     OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT = 1 << 3,
+#     OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES = 1 << 4
+#     OPTIX_RAY_FLAG_CULL_FRONT_FACING_TRIANGLES = 1 << 5
+#     OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT = 1 << 6
+#     OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT = 1 << 7
+    
+
 
 # OptiX types
 # -----------
@@ -1051,6 +1064,7 @@ def __raygen__rg():
             types.float32(1e16),        # Max intersection distance
             types.float32(0.0),         # rayTime -- used for motion blur
             OptixVisibilityMask(255),   # Specify always visible
+            # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
             OPTIX_RAY_FLAG_NONE,
             0,                          # SBT offset   -- See SBT discussion
             1,                          # SBT stride   -- See SBT discussion
