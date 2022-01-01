@@ -209,6 +209,12 @@ def float_to_float2_cast(context, builder, fromty, toty, val):
 
 
 def lower_float2_ops(op):
+    class Float2_op_template(ConcreteTemplate):
+        key = op
+        cases = [
+            signature(float2, float2, float2)
+        ]
+
     def float2_op_impl(context, builder, sig, args):
         def op_attr(lhs, rhs, res, attr):
             setattr(res, attr, context.compile_internal(
@@ -224,6 +230,7 @@ def lower_float2_ops(op):
         op_attr(lf2, rf2, res, 'y')
         return res._getvalue()    
 
+    register_global(op, types.Function(Float2_op_template))
     lower(op, float2, float2)(float2_op_impl)
 
 lower_float2_ops(mul)
@@ -305,6 +312,26 @@ def lower_make_uint3(context, builder, sig, args):
     u4_3.z = args[2]
     return u4_3._getvalue()
 
+# OptiX typedefs and enums
+# -----------
+
+OptixVisibilityMask = types.Integer('OptixVisibilityMask', bitwidth=32, signed=False)
+OptixTraversableHandle = types.Integer('OptixTraversableHandle', bitwidth=64, signed=False)
+
+
+OPTIX_RAY_FLAG_NONE = 0
+# class OptixRayFlags(Enum):
+#     OPTIX_RAY_FLAG_NONE = 0
+#     OPTIX_RAY_FLAG_DISABLE_ANYHIT = 1 << 0
+#     OPTIX_RAY_FLAG_ENFORCE_ANYHIT = 1 << 1
+#     OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT = 1 << 2
+#     OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT = 1 << 3,
+#     OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES = 1 << 4
+#     OPTIX_RAY_FLAG_CULL_FRONT_FACING_TRIANGLES = 1 << 5
+#     OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT = 1 << 6
+#     OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT = 1 << 7
+    
+
 
 # Params
 # ------------
@@ -355,7 +382,7 @@ class ParamsModel(models.StructModel):
             ('cam_u', float3),
             ('cam_v', float3),
             ('cam_w', float3),
-            ('handle', types.uint64),
+            ('handle', OptixTraversableHandle),
         ]
         super().__init__(dmm, fe_type, members)
 
@@ -390,30 +417,6 @@ def constant_params(context, builder, ty, pyval):
 
     return builder.load(gvar)
 
-
-# OptiX types
-# -----------
-
-# typedefs
-# ------
-
-OptixVisibilityMask = types.Integer('OptixVisibilityMask', bitwidth=32, signed=False)
-
-# Enum
-# ------
-
-OPTIX_RAY_FLAG_NONE = 0
-# class OptixRayFlags(Enum):
-#     OPTIX_RAY_FLAG_NONE = 0
-#     OPTIX_RAY_FLAG_DISABLE_ANYHIT = 1 << 0
-#     OPTIX_RAY_FLAG_ENFORCE_ANYHIT = 1 << 1
-#     OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT = 1 << 2
-#     OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT = 1 << 3,
-#     OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES = 1 << 4
-#     OPTIX_RAY_FLAG_CULL_FRONT_FACING_TRIANGLES = 1 << 5
-#     OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT = 1 << 6
-#     OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT = 1 << 7
-    
 
 
 # OptiX types
@@ -451,6 +454,9 @@ def _optix_GetLaunchDimensions():
 def _optix_GetSbtDataPointer():
     pass
 
+def _optix_Trace():
+    pass
+
 
 # Monkey-patch the functions into the optix module, so the user can write
 # optix.GetLaunchIndex etc., for symmetry with the rest of the API implemented
@@ -459,6 +465,7 @@ def _optix_GetSbtDataPointer():
 optix.GetLaunchIndex = _optix_GetLaunchIndex
 optix.GetLaunchDimensions = _optix_GetLaunchDimensions
 optix.GetSbtDataPointer = _optix_GetSbtDataPointer
+optix.Trace = _optix_Trace
 
 
 # OptiX function typing
@@ -472,6 +479,11 @@ class OptixGetLaunchIndex(ConcreteTemplate):
 class OptixGetLaunchDimensions(ConcreteTemplate):
     key = optix.GetLaunchDimensions
     cases = [signature(dim3)]
+
+@register
+class OptixGetSbtDataPointer(ConcreteTemplate):
+    key = optix.GetSbtDataPointer
+    cases = [signature(sbt_data_pointer)]
 
 @register
 class OptixGetSbtDataPointer(ConcreteTemplate):
