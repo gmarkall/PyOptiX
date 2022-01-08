@@ -4,19 +4,25 @@
 import array
 import ctypes  # C interop helpers
 import math
-from operator import add, mul, sub
 from enum import Enum
+from operator import add, mul, sub
 
 import cupy as cp  # CUDA bindings
 import numpy as np  # Packing of structures in C-compatible format
 import optix
+
+from llvmlite import ir
+
 from numba import cuda, float32, types, uint8
 from numba.core import cgutils
 from numba.core.extending import (make_attribute_wrapper, models, overload,
                                   register_model, typeof_impl)
-from numba.core.imputils import lower_constant, lower_cast
+from numba.core.imputils import lower_cast, lower_constant
+from numba.core.typeconv import Conversion
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
+
+from numba.cuda import get_current_device
 from numba.cuda.compiler import compile_cuda as numba_compile_cuda
 from numba.cuda.cudadecl import register, register_attr, register_global
 from numba.cuda.cudadrv import nvvm
@@ -104,6 +110,10 @@ def lower_make_uchar4(context, builder, sig, args):
 class Float3(types.Type):
     def __init__(self):
         super().__init__(name="Float3")
+    
+    def can_convert_from(self, typingctx, other):
+        if isinstance(other, types.Float):
+            return Conversion.promote
 
 
 float3 = Float3()
@@ -125,27 +135,75 @@ make_attribute_wrapper(Float3, 'x', 'x')
 make_attribute_wrapper(Float3, 'y', 'y')
 make_attribute_wrapper(Float3, 'z', 'z')
 
-def lower_float3_ops(op):
-    def float3_op_impl(context, builder, sig, args):
-        def op_attr(lhs, rhs, res, attr):
-            setattr(res, attr, context.compile_internal(
-                builder,
-                lambda x, y: op(x, y),
-                signature(types.float32, types.float32, types.float32),
-                (getattr(lhs, attr), getattr(rhs, attr))
-            ))
-        lf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
-        rf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
-        res = cgutils.create_struct_proxy(float3)(context, builder)
-        op_attr(lf3, rf3, res, 'x')
-        op_attr(lf3, rf3, res, 'y')
-        op_attr(lf3, rf3, res, 'z')
-        return res._getvalue()    
+@lower_cast(types.Float, float3)
+def float_to_float3_cast(context, builder, fromty, toty, val):
+    f3 = cgutils.create_struct_proxy(float3)(context, builder)
+    f3.x = val
+    f3.y = val
+    f3.z = val
+    return f3._getvalue()
 
-    lower(op, float3, float3)(float3_op_impl)
 
-lower_float3_ops(mul)
-lower_float3_ops(add)
+# def lower_float3_ops(op):
+#     class Float3_op_template(ConcreteTemplate):
+#         key = op
+#         cases = [
+#             signature(float3, float3, float3)
+#         ]
+
+#     def float3_op_impl(context, builder, sig, args):
+#         def op_attr(lhs, rhs, res, attr):
+#             setattr(res, attr, context.compile_internal(
+#                 builder,
+#                 lambda x, y: op(x, y),
+#                 signature(types.float32, types.float32, types.float32),
+#                 (getattr(lhs, attr), getattr(rhs, attr))
+#             ))
+#         lf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
+#         rf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
+#         res = cgutils.create_struct_proxy(float3)(context, builder)
+#         op_attr(lf3, rf3, res, 'x')
+#         op_attr(lf3, rf3, res, 'y')
+#         op_attr(lf3, rf3, res, 'z')
+#         return res._getvalue()    
+
+#     register_global(op, types.Function(Float3_op_template))
+#     lower(op, float3, float3)(float3_op_impl)
+
+# lower_float3_ops(mul)
+# lower_float3_ops(add)
+
+@register_global(mul)
+class float3_mul_template(ConcreteTemplate):
+    cases = [
+        signature(float3, float3, float3)
+    ]
+
+@lower(mul, float3, float3)
+def mul_float3_impl(context, builder, sig, args):
+    lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
+    rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fmul(lhs.x, rhs.x)
+    res.y = builder.fmul(lhs.y, rhs.y)
+    res.z = builder.fmul(lhs.z, rhs.z)
+    return res._getvalue()
+
+@register_global(add)
+class float3_add_template(ConcreteTemplate):
+    cases = [
+        signature(float3, float3, float3)
+    ]
+
+@lower(add, float3, float3)
+def add_float3_impl(context, builder, sig, args):
+    lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
+    rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fadd(lhs.x, rhs.x)
+    res.y = builder.fadd(lhs.y, rhs.y)
+    res.z = builder.fadd(lhs.z, rhs.z)
+    return res._getvalue()
 
 # Prototype a function to construct a float3
 
@@ -181,6 +239,9 @@ class Float2(types.Type):
     def __init__(self):
         super().__init__(name="Float2")
 
+    def can_convert_from(self, typingctx, other):
+        if isinstance(other, types.Float):
+            return Conversion.safe
 
 float2 = Float2()
 
@@ -205,7 +266,7 @@ def float_to_float2_cast(context, builder, fromty, toty, val):
     f2 = cgutils.create_struct_proxy(float2)(context, builder)
     f2.x = val
     f2.y = val
-    return f2._get_value()
+    return f2._getvalue()
 
 
 def lower_float2_ops(op):
@@ -983,22 +1044,25 @@ def jit_clamp(x, a, b):
         def clamp_float_impl(x, a, b):
             return max(a, min(x, b))
         return clamp_float_impl
-    elif isinstance(x, float3):
+    elif isinstance(x, Float3):
         def clamp_float3_impl(x, a, b):
             return make_float3(clamp(x.x, a, b), clamp(x.y, a, b), clamp(x.z, a, b))
         return clamp_float3_impl
 
 
+# def dot(a, b):
+#     pass
+
+# @overload(dot, target="cuda")
+# def jit_dot(a, b):
+#     if isinstance(a, Float3) and isinstance(b, Float3):
+#         def dot_float3_impl(a, b):
+#             return a.x * b.x + a.y * b.y + a.z * b.z
+#         return dot_float3_impl
+
+@cuda.jit
 def dot(a, b):
-    pass
-
-@overload(dot, target="cuda")
-def jit_dot(a, b):
-    if isinstance(a, Float3) and isinstance(b, Float3):
-        def dot_float3_impl(a, b):
-            return a.x * b.x + a.y * b.y + a.z * b.z
-        return dot_float3_impl
-
+    return a.x * b.x + a.y * b.y + a.z * b.z
 
 @cuda.jit(device=True)
 def normalize(v):
@@ -1022,7 +1086,7 @@ def toSRGB(c):
 @cuda.jit(device=True)
 def quantizeUnsigned8Bits(x):
     x = clamp( x, float32(0.0), float32(1.0) )
-    N, Np1 = 1 << 8 - 1, 1 << 8 # compile-time integer constant ?
+    N, Np1 = 1 << 8 - 1, 1 << 8
     return uint8(min(uint8(x * float32(Np1)), uint8(N)))
 
 @cuda.jit(device=True)
@@ -1064,27 +1128,24 @@ def __raygen__rg():
     computeRay(make_uint3(idx.x, idx.y, 0), dim, ray_origin, ray_direction)
 
     # Trace the ray against our scene hierarchy
-    result = make_float3(0)
     p0 = cuda.local.array(1, types.int32)
     p1 = cuda.local.array(1, types.int32)
     p2 = cuda.local.array(1, types.int32)
-    optix.Trace(
-            params.handle,
-            ray_origin,
-            ray_direction,
-            types.float32(0.0),         # Min intersection distance
-            types.float32(1e16),        # Max intersection distance
-            types.float32(0.0),         # rayTime -- used for motion blur
-            OptixVisibilityMask(255),   # Specify always visible
-            # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
-            OPTIX_RAY_FLAG_NONE,
-            0,                          # SBT offset   -- See SBT discussion
-            1,                          # SBT stride   -- See SBT discussion
-            0,                          # missSBTIndex -- See SBT discussion
-            p0, p1, p2)
-    result.x = float32(p0)
-    result.y = float32(p1)
-    result.z = float32(p2)
+    # optix.Trace(
+    #         params.handle,
+    #         ray_origin,
+    #         ray_direction,
+    #         types.float32(0.0),         # Min intersection distance
+    #         types.float32(1e16),        # Max intersection distance
+    #         types.float32(0.0),         # rayTime -- used for motion blur
+    #         OptixVisibilityMask(255),   # Specify always visible
+    #         # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
+    #         OPTIX_RAY_FLAG_NONE,
+    #         0,                          # SBT offset   -- See SBT discussion
+    #         1,                          # SBT stride   -- See SBT discussion
+    #         0,                          # missSBTIndex -- See SBT discussion
+    #         p0, p1, p2)
+    result = make_float3(p0[0], p1[0], p2[0])
 
     # Record results in our output raster
     params.image[idx.y * params.image_width + idx.x] = make_color( result )
