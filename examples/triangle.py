@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 
 
-import array
 import ctypes  # C interop helpers
 import math
-from enum import Enum
 from operator import add, mul, sub
 
 import cupy as cp  # CUDA bindings
@@ -17,8 +15,7 @@ from numba import cuda, float32, types, uint8
 from numba.core import cgutils
 from numba.core.extending import (make_attribute_wrapper, models, overload,
                                   register_model, typeof_impl)
-from numba.core.imputils import lower_cast, lower_constant
-from numba.core.typeconv import Conversion
+from numba.core.imputils import lower_constant
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
 
@@ -26,15 +23,15 @@ from numba.cuda import get_current_device
 from numba.cuda.compiler import compile_cuda as numba_compile_cuda
 from numba.cuda.cudadecl import register, register_attr, register_global
 from numba.cuda.cudadrv import nvvm
-from numba.cuda.cudaimpl import lower, lower_attr
+from numba.cuda.cudaimpl import lower
 from numba.cuda.types import dim3
 from PIL import Image, ImageOps  # Image IO
 
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 #
 # Numba extensions for general CUDA / OptiX support
 #
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
 # UChar4
 # ------
@@ -88,6 +85,7 @@ make_attribute_wrapper(UChar4, 'y', 'y')
 make_attribute_wrapper(UChar4, 'z', 'z')
 make_attribute_wrapper(UChar4, 'w', 'w')
 
+
 # UChar4 lowering
 
 @lower(make_uchar4, types.uchar, types.uchar, types.uchar, types.uchar)
@@ -100,8 +98,6 @@ def lower_make_uchar4(context, builder, sig, args):
     return uc4._getvalue()
 
 
-
-
 # float3
 # ------
 
@@ -110,10 +106,6 @@ def lower_make_uchar4(context, builder, sig, args):
 class Float3(types.Type):
     def __init__(self):
         super().__init__(name="Float3")
-    
-    #def can_convert_from(self, typingctx, other):
-    #    if isinstance(other, types.Float):
-    #        return Conversion.promote
 
 
 float3 = Float3()
@@ -130,6 +122,7 @@ class Float3Model(models.StructModel):
             ('z', types.float32),
         ]
         super().__init__(dmm, fe_type, members)
+
 
 make_attribute_wrapper(Float3, 'x', 'x')
 make_attribute_wrapper(Float3, 'y', 'y')
@@ -189,37 +182,6 @@ def lower_float3_ops(op):
 lower_float3_ops(mul)
 lower_float3_ops(add)
 
-# @register_global(mul)
-# class float3_mul_template(ConcreteTemplate):
-#     cases = [
-#         signature(float3, float3, float3)
-#     ]
-
-# @lower(mul, float3, float3)
-# def mul_float3_impl(context, builder, sig, args):
-#     lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
-#     rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
-#     res = cgutils.create_struct_proxy(float3)(context, builder)
-#     res.x = builder.fmul(lhs.x, rhs.x)
-#     res.y = builder.fmul(lhs.y, rhs.y)
-#     res.z = builder.fmul(lhs.z, rhs.z)
-#     return res._getvalue()
-
-# @register_global(add)
-# class float3_add_template(ConcreteTemplate):
-#     cases = [
-#         signature(float3, float3, float3)
-#     ]
-
-# @lower(add, float3, float3)
-# def add_float3_impl(context, builder, sig, args):
-#     lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
-#     rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
-#     res = cgutils.create_struct_proxy(float3)(context, builder)
-#     res.x = builder.fadd(lhs.x, rhs.x)
-#     res.y = builder.fadd(lhs.y, rhs.y)
-#     res.z = builder.fadd(lhs.z, rhs.z)
-#     return res._getvalue()
 
 # Prototype a function to construct a float3
 
@@ -234,6 +196,7 @@ class MakeFloat3(ConcreteTemplate):
 
 
 register_global(make_float3, types.Function(MakeFloat3))
+
 
 # make_float3 lowering
 
@@ -255,9 +218,6 @@ class Float2(types.Type):
     def __init__(self):
         super().__init__(name="Float2")
 
-    #def can_convert_from(self, typingctx, other):
-    #    if isinstance(other, types.Float):
-    #        return Conversion.safe
 
 float2 = Float2()
 
@@ -276,13 +236,6 @@ class Float2Model(models.StructModel):
 
 make_attribute_wrapper(Float2, 'x', 'x')
 make_attribute_wrapper(Float2, 'y', 'y')
-
-#@lower_cast(types.Float, float2)
-#def float_to_float2_cast(context, builder, fromty, toty, val):
-#    f2 = cgutils.create_struct_proxy(float2)(context, builder)
-#    f2.x = val
-#    f2.y = val
-#    return f2._getvalue()
 
 
 def lower_float2_ops(op):
@@ -331,13 +284,16 @@ def lower_float2_ops(op):
     lower(op, types.Float, float2)(float2_op_impl)
     lower(op, float2, types.Float)(float2_op_impl)
 
+
 lower_float2_ops(mul)
 lower_float2_ops(sub)
+
 
 # Prototype a function to construct a float2
 
 def make_float2(x, y):
     pass
+
 
 @register
 class MakeFloat2(ConcreteTemplate):
@@ -346,6 +302,7 @@ class MakeFloat2(ConcreteTemplate):
 
 
 register_global(make_float2, types.Function(MakeFloat2))
+
 
 # make_float2 lowering
 
@@ -357,10 +314,8 @@ def lower_make_float2(context, builder, sig, args):
     return f2._getvalue()
 
 
-
 # uint3
 # ------
-
 
 class UInt3(types.Type):
     def __init__(self):
@@ -368,6 +323,7 @@ class UInt3(types.Type):
 
 
 uint3 = UInt3()
+
 
 # UInt3 data model
 
@@ -381,14 +337,17 @@ class UInt3Model(models.StructModel):
         ]
         super().__init__(dmm, fe_type, members)
 
+
 make_attribute_wrapper(UInt3, 'x', 'x')
 make_attribute_wrapper(UInt3, 'y', 'y')
 make_attribute_wrapper(UInt3, 'z', 'z')
+
 
 # Prototype a function to construct a uint3
 
 def make_uint3(x, y, z):
     pass
+
 
 @register
 class MakeUInt3(ConcreteTemplate):
@@ -410,11 +369,14 @@ def lower_make_uint3(context, builder, sig, args):
     u4_3.z = args[2]
     return u4_3._getvalue()
 
+
 # OptiX typedefs and enums
 # -----------
 
-OptixVisibilityMask = types.Integer('OptixVisibilityMask', bitwidth=32, signed=False)
-OptixTraversableHandle = types.Integer('OptixTraversableHandle', bitwidth=64, signed=False)
+OptixVisibilityMask = types.Integer('OptixVisibilityMask', bitwidth=32,
+                                    signed=False)
+OptixTraversableHandle = types.Integer('OptixTraversableHandle', bitwidth=64,
+                                       signed=False)
 
 
 OPTIX_RAY_FLAG_NONE = 0
@@ -428,12 +390,10 @@ OPTIX_RAY_FLAG_NONE = 0
 #     OPTIX_RAY_FLAG_CULL_FRONT_FACING_TRIANGLES = 1 << 5
 #     OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT = 1 << 6
 #     OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT = 1 << 7
-    
 
 
 # Params
 # ------------
-
 
 # Structures as declared in triangle.h
 
@@ -449,10 +409,12 @@ class ParamsStruct:
         ('handle', 'OptixTraversableHandle'),
     )
 
+
 class MissDataStruct:
     fields = {
         ('bg_color', 'float3')
     }
+
 
 # "Declare" a global called params
 
@@ -466,6 +428,7 @@ class Params(types.Type):
 
 
 params_type = Params()
+
 
 # ParamsStruct data model
 
@@ -509,12 +472,11 @@ def constant_params(context, builder, ty, pyval):
     except KeyError:
         llty = context.get_value_type(ty)
         gvar = cgutils.add_global_variable(builder.module, llty, 'params',
-                                          addrspace=nvvm.ADDRSPACE_CONSTANT)
+                                           addrspace=nvvm.ADDRSPACE_CONSTANT)
         gvar.linkage = 'external'
         gvar.global_constant = True
 
     return builder.load(gvar)
-
 
 
 # OptiX types
@@ -546,11 +508,14 @@ class SbtDataPointerModel(models.OpaqueModel):
 def _optix_GetLaunchIndex():
     pass
 
+
 def _optix_GetLaunchDimensions():
     pass
 
+
 def _optix_GetSbtDataPointer():
     pass
+
 
 def _optix_Trace():
     pass
@@ -573,15 +538,12 @@ class OptixGetLaunchIndex(ConcreteTemplate):
     key = optix.GetLaunchIndex
     cases = [signature(dim3)]
 
+
 @register
 class OptixGetLaunchDimensions(ConcreteTemplate):
     key = optix.GetLaunchDimensions
     cases = [signature(dim3)]
 
-@register
-class OptixGetSbtDataPointer(ConcreteTemplate):
-    key = optix.GetSbtDataPointer
-    cases = [signature(sbt_data_pointer)]
 
 @register
 class OptixGetSbtDataPointer(ConcreteTemplate):
@@ -638,42 +600,42 @@ def lower_optix_getLaunchDimensions(context, builder, sig, args):
 @lower(optix.GetSbtDataPointer)
 def lower_optix_getSbtDataPointer(context, builder, sig, args):
     asm = ir.InlineAsm(ir.FunctionType(ir.IntType(64), []),
-                       f"call ($0), _optix_get_sbt_data_ptr_64, ();",
+                       "call ($0), _optix_get_sbt_data_ptr_64, ();",
                        "=l")
     ptr = builder.call(asm, [])
     ptr = builder.inttoptr(ptr, ir.IntType(8).as_pointer())
     return ptr
 
 
+# -------------------------------------------------------------------------------
+#
+# Util
+#
+# -------------------------------------------------------------------------------
+pix_width = 1024
+pix_height = 768
 
-#-------------------------------------------------------------------------------
-#
-# Util 
-#
-#-------------------------------------------------------------------------------
-pix_width  = 1024 
-pix_height =  768 
 
 class Logger:
-    def __init__( self ):
+    def __init__(self):
         self.num_mssgs = 0
 
-    def __call__( self, level, tag, mssg ):
-        print( "[{:>2}][{:>12}]: {}".format( level, tag, mssg ) )
+    def __call__(self, level, tag, mssg):
+        print("[{:>2}][{:>12}]: {}".format(level, tag, mssg))
         self.num_mssgs += 1
 
 
-def log_callback( level, tag, mssg ):
-    print( "[{:>2}][{:>12}]: {}".format( level, tag, mssg ) )
-    
-
-def round_up( val, mult_of ):
-    return val if val % mult_of == 0 else val + mult_of - val % mult_of 
+def log_callback(level, tag, mssg):
+    print("[{:>2}][{:>12}]: {}".format(level, tag, mssg))
 
 
-def  get_aligned_itemsize( formats, alignment ):
+def round_up(val, mult_of):
+    return val if val % mult_of == 0 else val + mult_of - val % mult_of
+
+
+def get_aligned_itemsize(formats, alignment):
     names = []
-    for i in range( len(formats ) ):
+    for i in range(len(formats)):
         names.append( 'x'+str(i) )
 
     temp_dtype = np.dtype( { 
@@ -714,11 +676,11 @@ def compile_cuda( cuda_file ):
     return ptx
 
 
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 #
 # Optix setup
 #
-#-------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------
 
 def init_optix():
     print( "Initializing cuda ..." )
