@@ -4,6 +4,7 @@
 import ctypes  # C interop helpers
 import math
 from operator import add, mul, sub
+from enum import Enum
 
 import cupy as cp  # CUDA bindings
 import numpy as np  # Packing of structures in C-compatible format
@@ -569,7 +570,7 @@ class OptixGetLaunchDimensions(ConcreteTemplate):
 class OptixTrace(ConcreteTemplate):
     key = optix.Trace
     cases = [signature(
-        None,
+        types.void,
         OptixTraversableHandle,
         float3,
         float3,
@@ -580,7 +581,10 @@ class OptixTrace(ConcreteTemplate):
         uint32,
         uint32,
         uint32,
-        uint32
+        uint32,
+        uint32, # payload register 0
+        uint32, # payload register 1
+        uint32, # payload register 2
     )]
 
 
@@ -597,7 +601,7 @@ class OptixModuleTemplate(AttributeTemplate):
     def resolve_GetSbtDataPointer(self, mod):
         return types.Function(OptixGetSbtDataPointer)
     
-    def resolve_OptixTrace(self, mod):
+    def resolve_Trace(self, mod):
         return types.Function(OptixTrace)
 
 
@@ -643,29 +647,48 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
     return ptr
 
 
-@lower(optix.Trace)
+@lower(optix.Trace,
+        OptixTraversableHandle,
+        float3,
+        float3,
+        float32,
+        float32,
+        float32,
+        OptixVisibilityMask,
+        uint32,
+        uint32,
+        uint32,
+        uint32,
+        uint32, # payload register 0
+        uint32, # payload register 1
+        uint32, # payload register 2
+)
 def lower_optix_Trace(context, builder, sig, args):
-    rayOrigin = cgutils.create_struct_proxy(dim3)(context, builder)
+    # Only implements the version that accepts 3 payload registers
 
-    asm = ir.InlineAsm(ir.FunctionType(ir.VoidType(), [
-        ir.IntType(64),                             # OptixTraversableHandle
-        context.get_identified_type("float3"),      # rayOrigin
-        context.get_identified_type("float3"),      # rayDirection
-        ir.FloatType(),                             # tmin
-        ir.FloatType(),                             # tmax
-        ir.FloatType(),                             # rayTime
-        ir.IntType(32),                             # OptixVisibilityMask
-        ir.IntType(32),                             # rayFlags
-        ir.IntType(32),                             # SBToffset
-        ir.IntType(32),                             # SBTstride
-        ir.IntType(32),                             # missSBTIndex
-    ]),
+    (handle, rayOrigin, rayDirection, tmin, tmax, rayTime, visibilityMask,
+    rayFlags, SBToffset, SBTstride, missSBTIndex, p0, p1, p2) = args
+
+    rayOrigin = cgutils.create_struct_proxy(float3)(context, builder, rayOrigin)
+    rayDirection = cgutils.create_struct_proxy(float3)(context, builder, rayDirection)
+
+    ox, oy, oz = rayOrigin.x, rayOrigin.y, rayOrigin.z
+    dx, dy, dz = rayDirection.x, rayDirection.y, rayDirection.z
+
+    n_stub_output_operands = 32 - 3
+    outputs = [builder.alloca(ir.IntType(32)) for _ in range(n_stub_output_operands)]
+
+    asm = ir.InlineAsm(ir.FunctionType(ir.VoidType(), []),
     "call "
     "(%0,%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,%15,%16,%17,%18,%19,%20,%21,%22,%23,%24,%25,%26,%27,%28,%"
     "29,%30,%31),"
     "_optix_trace_typed_32,"
-
-    "=l")
+    "(%32,%33,%34,%35,%36,%37,%38,%39,%40,%41,%42,%43,%44,%45,%46,%47,%48,%49,%50,%51,%52,%53,%54,%55,%56,%57,%58,%"
+    "59,%60,%61,%62,%63,%64,%65,%66,%67,%68,%69,%70,%71,%72,%73,%74,%75,%76,%77,%78,%79,%80);"
+    "=r," * 32 + "r,l,f,f,f,f,f,f,f,f,f,r,r,r,r,r,r," + "r," * 31 + "r",
+    outputs + [0, handle, ox, oy, oz, dx, dy, dz, tmin, tmax, rayTime, visibilityMask, rayFlags, SBToffset, SBTstride, missSBTIndex, 0, p0, p1, p2] + outputs
+    )
+    return builder.call(asm, [])
 
 
 #-------------------------------------------------------------------------------
@@ -1173,8 +1196,8 @@ def computeRay(idx, dim, origin, direction):
             types.float32(idx.y) / types.float32(dim.y)
         ) - types.float32(1.0)
 
-    origin[0] = params.cam_eye
-    direction[0] = normalize(d.x * U + d.y * V + W)
+    origin = params.cam_eye
+    direction = normalize(d.x * U + d.y * V + W)
 
 
 def __raygen__rg():
@@ -1184,8 +1207,8 @@ def __raygen__rg():
 
     # Map our launch idx to a screen location and create a ray from the camera
     # location through the screen
-    ray_origin = cuda.local.array(1, float3)
-    ray_direction = cuda.local.array(1, float3)
+    ray_origin = make_float3(float32(0.0), float32(0.0), float32(0.0))
+    ray_direction = make_float3(float32(0.0), float32(0.0), float32(0.0))
     computeRay(make_uint3(idx.x, idx.y, 0), dim, ray_origin, ray_direction)
 
     # Trace the ray against our scene hierarchy
@@ -1201,11 +1224,11 @@ def __raygen__rg():
             types.float32(0.0),         # rayTime -- used for motion blur
             OptixVisibilityMask(255),   # Specify always visible
             # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
-            OPTIX_RAY_FLAG_NONE,
-            0,                          # SBT offset   -- See SBT discussion
-            1,                          # SBT stride   -- See SBT discussion
-            0,                          # missSBTIndex -- See SBT discussion
-            p0, p1, p2)
+            uint32(OPTIX_RAY_FLAG_NONE),
+            uint32(0),                          # SBT offset   -- See SBT discussion
+            uint32(1),                          # SBT stride   -- See SBT discussion
+            uint32(0),                          # missSBTIndex -- See SBT discussion
+            p0[0], p1[0], p2[0])
     result = make_float3(p0[0], p1[0], p2[0])
 
     # Record results in our output raster
