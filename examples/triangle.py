@@ -111,9 +111,9 @@ class Float3(types.Type):
     def __init__(self):
         super().__init__(name="Float3")
     
-    def can_convert_from(self, typingctx, other):
-        if isinstance(other, types.Float):
-            return Conversion.promote
+    #def can_convert_from(self, typingctx, other):
+    #    if isinstance(other, types.Float):
+    #        return Conversion.promote
 
 
 float3 = Float3()
@@ -135,75 +135,91 @@ make_attribute_wrapper(Float3, 'x', 'x')
 make_attribute_wrapper(Float3, 'y', 'y')
 make_attribute_wrapper(Float3, 'z', 'z')
 
-@lower_cast(types.Float, float3)
-def float_to_float3_cast(context, builder, fromty, toty, val):
-    f3 = cgutils.create_struct_proxy(float3)(context, builder)
-    f3.x = val
-    f3.y = val
-    f3.z = val
-    return f3._getvalue()
+
+def lower_float3_ops(op):
+    class Float3_op_template(ConcreteTemplate):
+        key = op
+        cases = [
+            signature(float3, float3, float3),
+            signature(float3, types.float32, float3),
+            signature(float3, float3, types.float32)
+        ]
+
+    def float3_op_impl(context, builder, sig, args):
+        def op_attr(lhs, rhs, res, attr):
+            setattr(res, attr, context.compile_internal(
+                builder,
+                lambda x, y: op(x, y),
+                signature(types.float32, types.float32, types.float32),
+                (getattr(lhs, attr), getattr(rhs, attr))
+            ))
+
+        arg0, arg1 = args
+
+        if isinstance(sig.args[0], types.Float):
+            lf3 = cgutils.create_struct_proxy(float3)(context, builder)
+            lf3.x = arg0
+            lf3.y = arg0
+            lf3.z = arg0
+        else:
+            lf3 = cgutils.create_struct_proxy(float3)(context, builder,
+                                                      value=args[0])
+
+        if isinstance(sig.args[1], types.Float):
+            rf3 = cgutils.create_struct_proxy(float3)(context, builder)
+            rf3.x = arg1
+            rf3.y = arg1
+            rf3.z = arg1
+        else:
+            rf3 = cgutils.create_struct_proxy(float3)(context, builder,
+                                                      value=args[1])
+
+        res = cgutils.create_struct_proxy(float3)(context, builder)
+        op_attr(lf3, rf3, res, 'x')
+        op_attr(lf3, rf3, res, 'y')
+        op_attr(lf3, rf3, res, 'z')
+        return res._getvalue()
+
+    register_global(op, types.Function(Float3_op_template))
+    lower(op, float3, float3)(float3_op_impl)
+    lower(op, types.float32, float3)(float3_op_impl)
+    lower(op, float3, types.float32)(float3_op_impl)
 
 
-# def lower_float3_ops(op):
-#     class Float3_op_template(ConcreteTemplate):
-#         key = op
-#         cases = [
-#             signature(float3, float3, float3)
-#         ]
+lower_float3_ops(mul)
+lower_float3_ops(add)
 
-#     def float3_op_impl(context, builder, sig, args):
-#         def op_attr(lhs, rhs, res, attr):
-#             setattr(res, attr, context.compile_internal(
-#                 builder,
-#                 lambda x, y: op(x, y),
-#                 signature(types.float32, types.float32, types.float32),
-#                 (getattr(lhs, attr), getattr(rhs, attr))
-#             ))
-#         lf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
-#         rf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
-#         res = cgutils.create_struct_proxy(float3)(context, builder)
-#         op_attr(lf3, rf3, res, 'x')
-#         op_attr(lf3, rf3, res, 'y')
-#         op_attr(lf3, rf3, res, 'z')
-#         return res._getvalue()    
+# @register_global(mul)
+# class float3_mul_template(ConcreteTemplate):
+#     cases = [
+#         signature(float3, float3, float3)
+#     ]
 
-#     register_global(op, types.Function(Float3_op_template))
-#     lower(op, float3, float3)(float3_op_impl)
+# @lower(mul, float3, float3)
+# def mul_float3_impl(context, builder, sig, args):
+#     lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
+#     rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
+#     res = cgutils.create_struct_proxy(float3)(context, builder)
+#     res.x = builder.fmul(lhs.x, rhs.x)
+#     res.y = builder.fmul(lhs.y, rhs.y)
+#     res.z = builder.fmul(lhs.z, rhs.z)
+#     return res._getvalue()
 
-# lower_float3_ops(mul)
-# lower_float3_ops(add)
+# @register_global(add)
+# class float3_add_template(ConcreteTemplate):
+#     cases = [
+#         signature(float3, float3, float3)
+#     ]
 
-@register_global(mul)
-class float3_mul_template(ConcreteTemplate):
-    cases = [
-        signature(float3, float3, float3)
-    ]
-
-@lower(mul, float3, float3)
-def mul_float3_impl(context, builder, sig, args):
-    lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
-    rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fmul(lhs.x, rhs.x)
-    res.y = builder.fmul(lhs.y, rhs.y)
-    res.z = builder.fmul(lhs.z, rhs.z)
-    return res._getvalue()
-
-@register_global(add)
-class float3_add_template(ConcreteTemplate):
-    cases = [
-        signature(float3, float3, float3)
-    ]
-
-@lower(add, float3, float3)
-def add_float3_impl(context, builder, sig, args):
-    lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
-    rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fadd(lhs.x, rhs.x)
-    res.y = builder.fadd(lhs.y, rhs.y)
-    res.z = builder.fadd(lhs.z, rhs.z)
-    return res._getvalue()
+# @lower(add, float3, float3)
+# def add_float3_impl(context, builder, sig, args):
+#     lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
+#     rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
+#     res = cgutils.create_struct_proxy(float3)(context, builder)
+#     res.x = builder.fadd(lhs.x, rhs.x)
+#     res.y = builder.fadd(lhs.y, rhs.y)
+#     res.z = builder.fadd(lhs.z, rhs.z)
+#     return res._getvalue()
 
 # Prototype a function to construct a float3
 
@@ -239,9 +255,9 @@ class Float2(types.Type):
     def __init__(self):
         super().__init__(name="Float2")
 
-    def can_convert_from(self, typingctx, other):
-        if isinstance(other, types.Float):
-            return Conversion.safe
+    #def can_convert_from(self, typingctx, other):
+    #    if isinstance(other, types.Float):
+    #        return Conversion.safe
 
 float2 = Float2()
 
@@ -261,19 +277,21 @@ class Float2Model(models.StructModel):
 make_attribute_wrapper(Float2, 'x', 'x')
 make_attribute_wrapper(Float2, 'y', 'y')
 
-@lower_cast(types.Float, float2)
-def float_to_float2_cast(context, builder, fromty, toty, val):
-    f2 = cgutils.create_struct_proxy(float2)(context, builder)
-    f2.x = val
-    f2.y = val
-    return f2._getvalue()
+#@lower_cast(types.Float, float2)
+#def float_to_float2_cast(context, builder, fromty, toty, val):
+#    f2 = cgutils.create_struct_proxy(float2)(context, builder)
+#    f2.x = val
+#    f2.y = val
+#    return f2._getvalue()
 
 
 def lower_float2_ops(op):
     class Float2_op_template(ConcreteTemplate):
         key = op
         cases = [
-            signature(float2, float2, float2)
+            signature(float2, float2, float2),
+            signature(float2, types.float32, float2),
+            signature(float2, float2, types.float32)
         ]
 
     def float2_op_impl(context, builder, sig, args):
@@ -284,15 +302,34 @@ def lower_float2_ops(op):
                 signature(types.float32, types.float32, types.float32),
                 (getattr(lhs, attr), getattr(rhs, attr))
             ))
-        lf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-        rf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
+
+        arg0, arg1 = args
+
+        if isinstance(sig.args[0], types.Float):
+            lf2 = cgutils.create_struct_proxy(float2)(context, builder)
+            lf2.x = arg0
+            lf2.y = arg0
+        else:
+            lf2 = cgutils.create_struct_proxy(float2)(context, builder,
+                                                      value=args[0])
+
+        if isinstance(sig.args[1], types.Float):
+            rf2 = cgutils.create_struct_proxy(float2)(context, builder)
+            rf2.x = arg1
+            rf2.y = arg1
+        else:
+            rf2 = cgutils.create_struct_proxy(float2)(context, builder,
+                                                      value=args[1])
+
         res = cgutils.create_struct_proxy(float2)(context, builder)
         op_attr(lf2, rf2, res, 'x')
         op_attr(lf2, rf2, res, 'y')
-        return res._getvalue()    
+        return res._getvalue()
 
     register_global(op, types.Function(Float2_op_template))
     lower(op, float2, float2)(float2_op_impl)
+    lower(op, types.Float, float2)(float2_op_impl)
+    lower(op, float2, types.Float)(float2_op_impl)
 
 lower_float2_ops(mul)
 lower_float2_ops(sub)
@@ -1060,9 +1097,10 @@ def jit_clamp(x, a, b):
 #             return a.x * b.x + a.y * b.y + a.z * b.z
 #         return dot_float3_impl
 
-@cuda.jit
+@cuda.jit(device=True)
 def dot(a, b):
     return a.x * b.x + a.y * b.y + a.z * b.z
+
 
 @cuda.jit(device=True)
 def normalize(v):
