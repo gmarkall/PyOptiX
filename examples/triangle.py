@@ -13,7 +13,7 @@ import optix
 
 from llvmlite import ir
 
-from numba import cuda, float32, types, uint8
+from numba import cuda, float32, types, uint8, uint32
 from numba.core import cgutils
 from numba.core.extending import (make_attribute_wrapper, models, overload,
                                   register_model, typeof_impl)
@@ -111,9 +111,9 @@ class Float3(types.Type):
     def __init__(self):
         super().__init__(name="Float3")
     
-    def can_convert_from(self, typingctx, other):
-        if isinstance(other, types.Float):
-            return Conversion.promote
+    # def can_convert_from(self, typingctx, other):
+    #     if isinstance(other, types.Float):
+    #         return Conversion.promote
 
 
 float3 = Float3()
@@ -135,13 +135,13 @@ make_attribute_wrapper(Float3, 'x', 'x')
 make_attribute_wrapper(Float3, 'y', 'y')
 make_attribute_wrapper(Float3, 'z', 'z')
 
-@lower_cast(types.Float, float3)
-def float_to_float3_cast(context, builder, fromty, toty, val):
-    f3 = cgutils.create_struct_proxy(float3)(context, builder)
-    f3.x = val
-    f3.y = val
-    f3.z = val
-    return f3._getvalue()
+# @lower_cast(types.Float, float3)
+# def float_to_float3_cast(context, builder, fromty, toty, val):
+#     f3 = cgutils.create_struct_proxy(float3)(context, builder)
+#     f3.x = val
+#     f3.y = val
+#     f3.z = val
+#     return f3._getvalue()
 
 
 # def lower_float3_ops(op):
@@ -176,7 +176,9 @@ def float_to_float3_cast(context, builder, fromty, toty, val):
 @register_global(mul)
 class float3_mul_template(ConcreteTemplate):
     cases = [
-        signature(float3, float3, float3)
+        signature(float3, float3, float3),
+        signature(float3, float32, float3),
+        signature(float3, float3, float32)
     ]
 
 @lower(mul, float3, float3)
@@ -189,10 +191,32 @@ def mul_float3_impl(context, builder, sig, args):
     res.z = builder.fmul(lhs.z, rhs.z)
     return res._getvalue()
 
+@lower(mul, float32, float3)
+def mul_float32_float3_impl(context, builder, sig, args):
+    s = args[0]
+    rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fmul(s, rhs.x)
+    res.y = builder.fmul(s, rhs.y)
+    res.z = builder.fmul(s, rhs.z)
+    return res._getvalue()
+
+@lower(mul, float3, float32)
+def mul_float3_float32_impl(context, builder, sig, args):
+    lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
+    s = args[1]
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fmul(lhs.x, s)
+    res.y = builder.fmul(lhs.y, s)
+    res.z = builder.fmul(lhs.z, s)
+    return res._getvalue()
+
 @register_global(add)
 class float3_add_template(ConcreteTemplate):
     cases = [
-        signature(float3, float3, float3)
+        signature(float3, float3, float3),
+        signature(float3, float32, float3),
+        signature(float3, float3, float32)
     ]
 
 @lower(add, float3, float3)
@@ -203,6 +227,26 @@ def add_float3_impl(context, builder, sig, args):
     res.x = builder.fadd(lhs.x, rhs.x)
     res.y = builder.fadd(lhs.y, rhs.y)
     res.z = builder.fadd(lhs.z, rhs.z)
+    return res._getvalue()
+
+@lower(add, float32, float3)
+def add_float32_float3_impl(context, builder, sig, args):
+    s = args[0]
+    rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fadd(s, rhs.x)
+    res.y = builder.fadd(s, rhs.y)
+    res.z = builder.fadd(s, rhs.z)
+    return res._getvalue()
+
+@lower(add, float3, float32)
+def add_float3_float32_impl(context, builder, sig, args):
+    lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
+    s = args[1]
+    res = cgutils.create_struct_proxy(float3)(context, builder)
+    res.x = builder.fadd(lhs.x, s)
+    res.y = builder.fadd(lhs.y, s)
+    res.z = builder.fadd(lhs.z, s)
     return res._getvalue()
 
 # Prototype a function to construct a float3
@@ -239,9 +283,9 @@ class Float2(types.Type):
     def __init__(self):
         super().__init__(name="Float2")
 
-    def can_convert_from(self, typingctx, other):
-        if isinstance(other, types.Float):
-            return Conversion.safe
+    # def can_convert_from(self, typingctx, other):
+    #     if isinstance(other, types.Float):
+    #         return Conversion.safe
 
 float2 = Float2()
 
@@ -261,41 +305,112 @@ class Float2Model(models.StructModel):
 make_attribute_wrapper(Float2, 'x', 'x')
 make_attribute_wrapper(Float2, 'y', 'y')
 
-@lower_cast(types.Float, float2)
-def float_to_float2_cast(context, builder, fromty, toty, val):
-    f2 = cgutils.create_struct_proxy(float2)(context, builder)
-    f2.x = val
-    f2.y = val
-    return f2._getvalue()
+# @lower_cast(types.Float, float2)
+# def float_to_float2_cast(context, builder, fromty, toty, val):
+#     f2 = cgutils.create_struct_proxy(float2)(context, builder)
+#     f2.x = val
+#     f2.y = val
+#     return f2._getvalue()
 
 
-def lower_float2_ops(op):
-    class Float2_op_template(ConcreteTemplate):
-        key = op
-        cases = [
-            signature(float2, float2, float2)
-        ]
+# def lower_float2_ops(op):
+#     class Float2_op_template(ConcreteTemplate):
+#         key = op
+#         cases = [
+#             signature(float2, float2, float2)
+#         ]
 
-    def float2_op_impl(context, builder, sig, args):
-        def op_attr(lhs, rhs, res, attr):
-            setattr(res, attr, context.compile_internal(
-                builder,
-                lambda x, y: op(x, y),
-                signature(types.float32, types.float32, types.float32),
-                (getattr(lhs, attr), getattr(rhs, attr))
-            ))
-        lf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-        rf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
-        res = cgutils.create_struct_proxy(float2)(context, builder)
-        op_attr(lf2, rf2, res, 'x')
-        op_attr(lf2, rf2, res, 'y')
-        return res._getvalue()    
+#     def float2_op_impl(context, builder, sig, args):
+#         def op_attr(lhs, rhs, res, attr):
+#             setattr(res, attr, context.compile_internal(
+#                 builder,
+#                 lambda x, y: op(x, y),
+#                 signature(types.float32, types.float32, types.float32),
+#                 (getattr(lhs, attr), getattr(rhs, attr))
+#             ))
+#         lf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
+#         rf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
+#         res = cgutils.create_struct_proxy(float2)(context, builder)
+#         op_attr(lf2, rf2, res, 'x')
+#         op_attr(lf2, rf2, res, 'y')
+#         return res._getvalue()    
 
-    register_global(op, types.Function(Float2_op_template))
-    lower(op, float2, float2)(float2_op_impl)
+#     register_global(op, types.Function(Float2_op_template))
+#     lower(op, float2, float2)(float2_op_impl)
 
-lower_float2_ops(mul)
-lower_float2_ops(sub)
+# lower_float2_ops(add)
+# lower_float2_ops(mul)
+# lower_float2_ops(sub)
+
+@register_global(mul)
+class float2_mul_template(ConcreteTemplate):
+    cases = [
+        signature(float2, float2, float2),
+        signature(float2, float32, float2),
+        signature(float2, float2, float32)
+    ]
+
+@lower(mul, float2, float2)
+def mul_float2_impl(context, builder, sig, args):
+    lhs = cgutils.create_struct_proxy(float2)(context, builder, args[0])
+    rhs = cgutils.create_struct_proxy(float2)(context, builder, args[1])
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fmul(lhs.x, rhs.x)
+    res.y = builder.fmul(lhs.y, rhs.y)
+    return res._getvalue()
+
+@lower(mul, float32, float2)
+def mul_float32_float2_impl(context, builder, sig, args):
+    s = args[0]
+    rhs = cgutils.create_struct_proxy(float2)(context, builder, args[1])
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fmul(s, rhs.x)
+    res.y = builder.fmul(s, rhs.y)
+    return res._getvalue()
+
+@lower(mul, float2, float32)
+def mul_float2_float32_impl(context, builder, sig, args):
+    lhs = cgutils.create_struct_proxy(float2)(context, builder, args[0])
+    s = args[1]
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fmul(lhs.x, s)
+    res.y = builder.fmul(lhs.y, s)
+    return res._getvalue()
+
+@register_global(sub)
+class float2_sub_template(ConcreteTemplate):
+    cases = [
+        signature(float2, float2, float2),
+        signature(float2, float32, float2),
+        signature(float2, float2, float32)
+    ]
+
+@lower(sub, float2, float2)
+def sub_float2_impl(context, builder, sig, args):
+    lhs = cgutils.create_struct_proxy(float2)(context, builder, args[0])
+    rhs = cgutils.create_struct_proxy(float2)(context, builder, args[1])
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fsub(lhs.x, rhs.x)
+    res.y = builder.fsub(lhs.y, rhs.y)
+    return res._getvalue()
+
+@lower(sub, float32, float2)
+def sub_float32_float2_impl(context, builder, sig, args):
+    s = args[0]
+    rhs = cgutils.create_struct_proxy(float2)(context, builder, args[1])
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fsub(s, rhs.x)
+    res.y = builder.fsub(s, rhs.y)
+    return res._getvalue()
+
+@lower(sub, float2, float32)
+def sub_float2_float32_impl(context, builder, sig, args):
+    lhs = cgutils.create_struct_proxy(float2)(context, builder, args[0])
+    s = args[1]
+    res = cgutils.create_struct_proxy(float2)(context, builder)
+    res.x = builder.fsub(lhs.x, s)
+    res.y = builder.fsub(lhs.y, s)
+    return res._getvalue()
 
 # Prototype a function to construct a float2
 
@@ -547,9 +662,22 @@ class OptixGetSbtDataPointer(ConcreteTemplate):
     cases = [signature(sbt_data_pointer)]
 
 @register
-class OptixGetSbtDataPointer(ConcreteTemplate):
-    key = optix.GetSbtDataPointer
-    cases = [signature(sbt_data_pointer)]
+class OptixTrace(ConcreteTemplate):
+    key = optix.Trace
+    cases = [signature(
+        None,
+        OptixTraversableHandle,
+        float3,
+        float3,
+        float32,
+        float32,
+        float32,
+        OptixVisibilityMask,
+        uint32,
+        uint32,
+        uint32,
+        uint32
+    )]
 
 
 @register_attr
@@ -564,6 +692,9 @@ class OptixModuleTemplate(AttributeTemplate):
 
     def resolve_GetSbtDataPointer(self, mod):
         return types.Function(OptixGetSbtDataPointer)
+    
+    def resolve_OptixTrace(self, mod):
+        return types.Function(OptixTrace)
 
 
 # OptiX function lowering
@@ -607,6 +738,30 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
     ptr = builder.inttoptr(ptr, ir.IntType(8).as_pointer())
     return ptr
 
+
+@lower(optix.Trace)
+def lower_optix_Trace(context, builder, sig, args):
+    rayOrigin = cgutils.create_struct_proxy(dim3)(context, builder)
+
+    asm = ir.InlineAsm(ir.FunctionType(ir.VoidType(), [
+        ir.IntType(64),                             # OptixTraversableHandle
+        context.get_identified_type("float3"),      # rayOrigin
+        context.get_identified_type("float3"),      # rayDirection
+        ir.FloatType(),                             # tmin
+        ir.FloatType(),                             # tmax
+        ir.FloatType(),                             # rayTime
+        ir.IntType(32),                             # OptixVisibilityMask
+        ir.IntType(32),                             # rayFlags
+        ir.IntType(32),                             # SBToffset
+        ir.IntType(32),                             # SBTstride
+        ir.IntType(32),                             # missSBTIndex
+    ]),
+    "call "
+    "(%0,%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,%15,%16,%17,%18,%19,%20,%21,%22,%23,%24,%25,%26,%27,%28,%"
+    "29,%30,%31),"
+    "_optix_trace_typed_32,"
+
+    "=l")
 
 
 #-------------------------------------------------------------------------------
@@ -1131,20 +1286,20 @@ def __raygen__rg():
     p0 = cuda.local.array(1, types.int32)
     p1 = cuda.local.array(1, types.int32)
     p2 = cuda.local.array(1, types.int32)
-    # optix.Trace(
-    #         params.handle,
-    #         ray_origin,
-    #         ray_direction,
-    #         types.float32(0.0),         # Min intersection distance
-    #         types.float32(1e16),        # Max intersection distance
-    #         types.float32(0.0),         # rayTime -- used for motion blur
-    #         OptixVisibilityMask(255),   # Specify always visible
-    #         # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
-    #         OPTIX_RAY_FLAG_NONE,
-    #         0,                          # SBT offset   -- See SBT discussion
-    #         1,                          # SBT stride   -- See SBT discussion
-    #         0,                          # missSBTIndex -- See SBT discussion
-    #         p0, p1, p2)
+    optix.Trace(
+            params.handle,
+            ray_origin,
+            ray_direction,
+            types.float32(0.0),         # Min intersection distance
+            types.float32(1e16),        # Max intersection distance
+            types.float32(0.0),         # rayTime -- used for motion blur
+            OptixVisibilityMask(255),   # Specify always visible
+            # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
+            OPTIX_RAY_FLAG_NONE,
+            0,                          # SBT offset   -- See SBT discussion
+            1,                          # SBT stride   -- See SBT discussion
+            0,                          # missSBTIndex -- See SBT discussion
+            p0, p1, p2)
     result = make_float3(p0[0], p1[0], p2[0])
 
     # Record results in our output raster
