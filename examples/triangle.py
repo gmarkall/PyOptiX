@@ -15,7 +15,7 @@ from llvmlite import ir
 from numba import cuda, float32, types, uint8, uint32
 from numba.core import cgutils
 from numba.core.extending import (make_attribute_wrapper, models, overload,
-                                  register_model, typeof_impl)
+                                  register_model, typeof_impl, type_callable)
 from numba.core.imputils import lower_constant
 from numba.core.typing.templates import (AttributeTemplate, ConcreteTemplate,
                                          signature)
@@ -413,6 +413,26 @@ OPTIX_RAY_FLAG_NONE = 0
 #     OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT = 1 << 7
 
 
+# OptiX types
+# -----------
+
+# Typing for OptiX types
+
+class SbtDataPointer(types.RawPointer):
+    def __init__(self):
+        super().__init__(name="SbtDataPointer")
+
+
+sbt_data_pointer = SbtDataPointer()
+
+
+# Models for OptiX types
+
+@register_model(SbtDataPointer)
+class SbtDataPointerModel(models.OpaqueModel):
+    pass
+
+
 # Params
 # ------------
 
@@ -431,17 +451,8 @@ class ParamsStruct:
     )
 
 
-class MissDataStruct:
-    fields = {
-        ('bg_color', 'float3')
-    }
-
-
 # "Declare" a global called params
-
 params = ParamsStruct()
-MissData = MissDataStruct()
-
 
 class Params(types.Type):
     def __init__(self):
@@ -485,6 +496,8 @@ def typeof_params(val, c):
 
 
 # ParamsStruct lowering
+# The below makes 'param' a global variable, accessible from any user defined
+# kernels.
 
 @lower_constant(Params)
 def constant_params(context, builder, ty, pyval):
@@ -500,24 +513,61 @@ def constant_params(context, builder, ty, pyval):
     return builder.load(gvar)
 
 
-# OptiX types
-# -----------
+# MissData
+# ------------
 
-# Typing for OptiX types
+# Structures as declared in triangle.h
+class MissDataStruct:
+    fields = (
+        ('bg_color', 'float3')
+    )
 
-class SbtDataPointer(types.RawPointer):
+MissData = MissDataStruct()
+
+class MissData(types.Type):
     def __init__(self):
-        super().__init__(name="SbtDataPointer")
+        super().__init__(name='MissDataType')
 
+miss_data_type = MissData()
 
-sbt_data_pointer = SbtDataPointer()
+@register_model(MissData)
+class MissDataModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('bg_color', float3),
+        ]
+        super().__init__(dmm, fe_type, members)
 
+make_attribute_wrapper(MissData, 'bg_color', 'bg_color')
 
-# Models for OptiX types
+@typeof_impl.register(MissDataStruct)
+def typeof_miss_data(val, c):
+    return miss_data_type
 
-@register_model(SbtDataPointer)
-class SbtDataPointerModel(models.OpaqueModel):
-    pass
+# MissData Constructor
+@type_callable(MissDataStruct)
+def type_miss_data_struct(context):
+    def typer(sbt_data_pointer):
+        if isinstance(sbt_data_pointer, SbtDataPointer):
+            return miss_data_type
+    return typer
+
+@lower(MissDataStruct, sbt_data_pointer)
+def lower_miss_data_ctor(context, builder, sig, args):
+    # Anyway to err if this ctor is not called inside __miss__* program?
+    ptr = args[0]
+    ptr = builder.bitcast(ptr,
+                          context.get_value_type(miss_data_type).as_pointer())
+    miss_data = cgutils.create_struct_proxy(miss_data_type)(context, builder)
+    bg_color_ptr = cgutils.gep_inbounds(builder, ptr, 0, 0)
+
+    xptr = cgutils.gep_inbounds(builder, bg_color_ptr, 0, 0)
+    yptr = cgutils.gep_inbounds(builder, bg_color_ptr, 0, 1)
+    zptr = cgutils.gep_inbounds(builder, bg_color_ptr, 0, 2)
+    miss_data.bg_color.x = builder.load(xptr)
+    miss_data.bg_color.y = builder.load(yptr)
+    miss_data.bg_color.z = builder.load(zptr)
+    return miss_data._getvalue()
 
 
 # OptiX functions
@@ -537,6 +587,14 @@ def _optix_GetLaunchDimensions():
 def _optix_GetSbtDataPointer():
     pass
 
+def _optix_SetPayload_0():
+    pass
+
+def _optix_SetPayload_1():
+    pass
+
+def _optix_SetPayload_2():
+    pass
 
 def _optix_Trace():
     pass
@@ -549,6 +607,10 @@ def _optix_Trace():
 optix.GetLaunchIndex = _optix_GetLaunchIndex
 optix.GetLaunchDimensions = _optix_GetLaunchDimensions
 optix.GetSbtDataPointer = _optix_GetSbtDataPointer
+optix.SetPayload_0 = _optix_SetPayload_0
+optix.SetPayload_1 = _optix_SetPayload_1
+optix.SetPayload_2 = _optix_SetPayload_2
+
 optix.Trace = _optix_Trace
 
 
@@ -565,6 +627,22 @@ class OptixGetLaunchDimensions(ConcreteTemplate):
     key = optix.GetLaunchDimensions
     cases = [signature(dim3)]
 
+
+@register
+class OptixGetSbtDataPointer(ConcreteTemplate):
+    key = optix.GetSbtDataPointer
+    cases = [signature(sbt_data_pointer)]
+
+def registerSetPayload(reg):
+    class OptixSetPayloadReg(ConcreteTemplate):
+        key = getattr(optix, 'SetPayload_' + str(reg))
+        cases = [signature(types.void, uint32)]
+    register(OptixSetPayloadReg)
+    return OptixSetPayloadReg
+
+OptixSetPayload_0 = registerSetPayload(0)
+OptixSetPayload_1 = registerSetPayload(1)
+OptixSetPayload_2 = registerSetPayload(2)
 
 @register
 class OptixTrace(ConcreteTemplate):
@@ -600,6 +678,15 @@ class OptixModuleTemplate(AttributeTemplate):
 
     def resolve_GetSbtDataPointer(self, mod):
         return types.Function(OptixGetSbtDataPointer)
+    
+    def resolve_SetPayload_0(self, mod):
+        return types.Function(OptixSetPayload_0)
+    
+    def resolve_SetPayload_1(self, mod):
+        return types.Function(OptixSetPayload_1)
+    
+    def resolve_SetPayload_2(self, mod):
+        return types.Function(OptixSetPayload_2)
     
     def resolve_Trace(self, mod):
         return types.Function(OptixTrace)
@@ -646,6 +733,18 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
     ptr = builder.inttoptr(ptr, ir.IntType(8).as_pointer())
     return ptr
 
+
+def lower_optix_SetPayloadReg(reg):
+    def lower_optix_SetPayload_impl(context, builder, sig, args):
+        asm = ir.InlineAsm(ir.FunctionType(ir.VoidType(), [ir.IntType(32), ir.IntType(32)]),
+            f"call _optix_set_payload_{reg};",
+            "r, r")
+        builder.call(asm, [context.get_constant(types.int32, reg), args[0]])
+    lower(getattr(optix, f"SetPayload_{reg}"), uint32)(lower_optix_SetPayload_impl)
+
+lower_optix_SetPayloadReg(0)
+lower_optix_SetPayloadReg(1)
+lower_optix_SetPayloadReg(2)
 
 @lower(optix.Trace,
         OptixTraversableHandle,
@@ -862,7 +961,7 @@ def set_pipeline_options():
         )
 
 
-def create_module( ctx, pipeline_options, triangle_ptx ):
+def create_module( ctx, pipeline_options, ptx ):
     print( "Creating optix module ..." )
     
 
@@ -875,47 +974,39 @@ def create_module( ctx, pipeline_options, triangle_ptx ):
     module, log = ctx.moduleCreateFromPTX(
             module_options,
             pipeline_options,
-            triangle_ptx
-            )
+            ptx
+        )
     print( "\tModule create log: <<<{}>>>".format( log ) )
     return module
 
 
-def create_program_groups( ctx, module ):
+def create_program_groups( ctx, raygen_module, miss_prog_module, hitgroup_module ):
     print( "Creating program groups ... " )
 
     program_group_options = optix.ProgramGroupOptions()
 
     raygen_prog_group_desc                          = optix.ProgramGroupDesc()
+    raygen_prog_group_desc.kind = optix.OPTIX_PROGRAM_GROUP_KIND_RAYGEN
     raygen_prog_group_desc.raygenModule             = module
     raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__rg"
-    raygen_prog_group, log = ctx.programGroupCreate(
-            [ raygen_prog_group_desc ], 
-            program_group_options,
-            )
-    print( "\tProgramGroup raygen create log: <<<{}>>>".format( log ) )
-    
+
     miss_prog_group_desc                        = optix.ProgramGroupDesc()
+    miss_prog_group_desc.kind = optix.OPTIX_PROGRAM_GROUP_KIND_MISS
     miss_prog_group_desc.missModule             = module
     miss_prog_group_desc.missEntryFunctionName  = "__miss__ms"
-    miss_prog_group, log = ctx.programGroupCreate(
-            [ miss_prog_group_desc ], 
-            program_group_options,
-            )
-    print( "\tProgramGroup miss create log: <<<{}>>>".format( log ) )
-    
 
     hitgroup_prog_group_desc                             = optix.ProgramGroupDesc()
+    hitgroup_prog_group_desc.kind = optix.OPTIX_PROGRAM_GROUP_KIND_HITGROUP
     hitgroup_prog_group_desc.hitgroupModuleCH            = module
     hitgroup_prog_group_desc.hitgroupEntryFunctionNameCH = "__closesthit__ch"
-    hitgroup_prog_group, log = ctx.programGroupCreate(
-            [ hitgroup_prog_group_desc ], 
+
+    prog_group, log = ctx.programGroupCreate(
+            [ raygen_prog_group_desc, miss_prog_group_desc, hitgroup_prog_group_desc ], 
             program_group_options,
             )
-    print( "\tProgramGroup hitgroup create log: <<<{}>>>".format( log ) )
+    print( "\tProgramGroup create log: <<<{}>>>".format( log ) )
 
-
-    return [ raygen_prog_group[0], miss_prog_group[0], hitgroup_prog_group[0] ]
+    return prog_group
 
 
 def create_pipeline( ctx, program_groups, pipeline_compile_options ):
@@ -1076,7 +1167,7 @@ def launch( pipeline, sbt, trav_handle ):
         pix_width,
         pix_height,
         1 # depth
-        )
+    )
 
     stream.synchronize()
 
@@ -1193,9 +1284,9 @@ def make_color(c):
 
 @cuda.jit(device=True)
 def setPayload(p):
-    optix.SetPayload_0(float_as_int(p.x))
-    optix.SetPayload_1(float_as_int(p.y))
-    optix.SetPayload_2(float_as_int(p.z))
+    optix.SetPayload_0(uint32(p.x))
+    optix.SetPayload_1(uint32(p.y))
+    optix.SetPayload_2(uint32(p.z))
 
 @cuda.jit(device=True)
 def computeRay(idx, dim, origin, direction):
@@ -1226,33 +1317,31 @@ def __raygen__rg():
     p0 = cuda.local.array(1, types.int32)
     p1 = cuda.local.array(1, types.int32)
     p2 = cuda.local.array(1, types.int32)
-    optix.Trace(
-            params.handle,
-            ray_origin,
-            ray_direction,
-            types.float32(0.0),         # Min intersection distance
-            types.float32(1e16),        # Max intersection distance
-            types.float32(0.0),         # rayTime -- used for motion blur
-            OptixVisibilityMask(255),   # Specify always visible
-            # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
-            uint32(OPTIX_RAY_FLAG_NONE),
-            uint32(0),                          # SBT offset   -- See SBT discussion
-            uint32(1),                          # SBT stride   -- See SBT discussion
-            uint32(0),                          # missSBTIndex -- See SBT discussion
-            p0[0], p1[0], p2[0])
+    # optix.Trace(
+    #         params.handle,
+    #         ray_origin,
+    #         ray_direction,
+    #         types.float32(0.0),         # Min intersection distance
+    #         types.float32(1e16),        # Max intersection distance
+    #         types.float32(0.0),         # rayTime -- used for motion blur
+    #         OptixVisibilityMask(255),   # Specify always visible
+    #         # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
+    #         uint32(OPTIX_RAY_FLAG_NONE),
+    #         uint32(0),                          # SBT offset   -- See SBT discussion
+    #         uint32(1),                          # SBT stride   -- See SBT discussion
+    #         uint32(0),                          # missSBTIndex -- See SBT discussion
+    #         p0[0], p1[0], p2[0])
     result = make_float3(p0[0], p1[0], p2[0])
 
     # Record results in our output raster
     params.image[idx.y * params.image_width + idx.x] = make_color( result )
 
 
-@cuda.jit
 def __miss__ms():
-    miss_data  = MissData(optix.GetSbtDataPointer())
+    miss_data  = MissDataStruct(optix.GetSbtDataPointer())
     setPayload(miss_data.bg_color)
 
 
-@cuda.jit
 def __closesthit__ch():
     # When built-in triangle intersection is used, a number of fundamental
     # attributes are provided by the OptiX API, indlucing barycentric coordinates.
@@ -1269,17 +1358,23 @@ def __closesthit__ch():
 
 
 def main():
-    triangle_ptx = compile_numba(__raygen__rg)
+    raygen_ptx = compile_numba(__raygen__rg)
+    miss_ptx = compile_numba(__miss__ms)
+    hitgroup_ptx = compile_numba(__closesthit__ch)
+    
     # triangle_ptx = compile_cuda( "examples/triangle.cu" )
-    # print(triangle_ptx)
 
     init_optix()
 
     ctx              = create_ctx()
     gas_handle, d_gas_output_buffer = create_accel(ctx)
     pipeline_options = set_pipeline_options()
-    module           = create_module( ctx, pipeline_options, triangle_ptx )
-    prog_groups      = create_program_groups( ctx, module )
+    
+    raygen_module           = create_module( ctx, pipeline_options, raygen_ptx )
+    miss_module             = create_module( ctx, pipeline_options, miss_ptx )
+    hitgroup_module            = create_module( ctx, pipeline_options, hitgroup_ptx )
+
+    prog_groups      = create_program_groups( ctx, raygen_module, miss_module, hitgroup_module )
     pipeline         = create_pipeline( ctx, prog_groups, pipeline_options )
     sbt              = create_sbt( prog_groups ) 
     pix              = launch( pipeline, sbt, gas_handle ) 
