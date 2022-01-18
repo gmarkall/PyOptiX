@@ -596,6 +596,9 @@ def _optix_SetPayload_1():
 def _optix_SetPayload_2():
     pass
 
+def _optix_GetTriangleBarycentrics():
+    pass
+
 def _optix_Trace():
     pass
 
@@ -607,6 +610,7 @@ def _optix_Trace():
 optix.GetLaunchIndex = _optix_GetLaunchIndex
 optix.GetLaunchDimensions = _optix_GetLaunchDimensions
 optix.GetSbtDataPointer = _optix_GetSbtDataPointer
+optix.GetTriangleBarycentrics = _optix_GetTriangleBarycentrics
 optix.SetPayload_0 = _optix_SetPayload_0
 optix.SetPayload_1 = _optix_SetPayload_1
 optix.SetPayload_2 = _optix_SetPayload_2
@@ -643,6 +647,11 @@ def registerSetPayload(reg):
 OptixSetPayload_0 = registerSetPayload(0)
 OptixSetPayload_1 = registerSetPayload(1)
 OptixSetPayload_2 = registerSetPayload(2)
+
+@register
+class OptixGetTriangleBarycentrics(ConcreteTemplate):
+    key = optix.GetTriangleBarycentrics
+    cases = [signature(float2)]
 
 @register
 class OptixTrace(ConcreteTemplate):
@@ -687,6 +696,9 @@ class OptixModuleTemplate(AttributeTemplate):
     
     def resolve_SetPayload_2(self, mod):
         return types.Function(OptixSetPayload_2)
+    
+    def resolve_GetTriangleBarycentrics(self, mod):
+        return types.Function(OptixGetTriangleBarycentrics)
     
     def resolve_Trace(self, mod):
         return types.Function(OptixTrace)
@@ -745,6 +757,21 @@ def lower_optix_SetPayloadReg(reg):
 lower_optix_SetPayloadReg(0)
 lower_optix_SetPayloadReg(1)
 lower_optix_SetPayloadReg(2)
+
+@lower(optix.GetTriangleBarycentrics)
+def lower_optix_getTriangleBarycentrics(context, builder, sig, args):
+    f2 = cgutils.create_struct_proxy(float2)(context, builder)
+    retty = ir.LiteralStructType([ir.FloatType(), ir.FloatType()])
+    asm = ir.InlineAsm(
+        ir.FunctionType(retty, []), 
+        "call (%0, %1), _optix_get_triangle_barycentrics, ();",
+        "=f, =f"
+    )
+    ret = builder.call(asm, [])
+    f2.x = builder.extract_value(ret, 0)
+    f2.y = builder.extract_value(ret, 1)
+    return f2._getvalue()
+
 
 @lower(optix.Trace,
         OptixTraversableHandle,
