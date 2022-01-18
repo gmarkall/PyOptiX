@@ -12,7 +12,7 @@ import optix
 
 from llvmlite import ir
 
-from numba import cuda, float32, types, uint8, uint32
+from numba import cuda, float32, types, uint8, uint32, int32
 from numba.core import cgutils
 from numba.core.extending import (make_attribute_wrapper, models, overload,
                                   register_model, typeof_impl, type_callable)
@@ -223,8 +223,10 @@ def make_float3(x, y, z):
 @register
 class MakeFloat3(ConcreteTemplate):
     key = make_float3
-    cases = [signature(float3, types.float32, types.float32, types.float32),
-    signature(float3, float2, types.float32)]
+    cases = [
+        signature(float3, types.float32, types.float32, types.float32),
+        signature(float3, float2, types.float32)
+    ]
 
 
 register_global(make_float3, types.Function(MakeFloat3))
@@ -1262,29 +1264,25 @@ def clamp(x, a, b):
 
 @overload(clamp, target="cuda")
 def jit_clamp(x, a, b):
-    if isinstance(x, types.Float):
+    if isinstance(x, types.Float) and isinstance(a, types.Float) and isinstance(b, types.Float):
         def clamp_float_impl(x, a, b):
             return max(a, min(x, b))
         return clamp_float_impl
-    elif isinstance(x, Float3):
+    elif isinstance(x, Float3) and isinstance(a, types.Float) and isinstance(b, types.Float):
         def clamp_float3_impl(x, a, b):
             return make_float3(clamp(x.x, a, b), clamp(x.y, a, b), clamp(x.z, a, b))
         return clamp_float3_impl
 
 
-# def dot(a, b):
-#     pass
-
-# @overload(dot, target="cuda")
-# def jit_dot(a, b):
-#     if isinstance(a, Float3) and isinstance(b, Float3):
-#         def dot_float3_impl(a, b):
-#             return a.x * b.x + a.y * b.y + a.z * b.z
-#         return dot_float3_impl
-
-@cuda.jit(device=True)
 def dot(a, b):
-    return a.x * b.x + a.y * b.y + a.z * b.z
+    pass
+
+@overload(dot, target="cuda")
+def jit_dot(a, b):
+    if isinstance(a, Float3) and isinstance(b, Float3):
+        def dot_float3_impl(a, b):
+            return a.x * b.x + a.y * b.y + a.z * b.z
+        return dot_float3_impl
 
 
 @cuda.jit(device=True)
@@ -1299,7 +1297,7 @@ def normalize(v):
 def toSRGB(c):
     # Use float32 for constants
     invGamma = float32(1.0) / float32(2.4)
-    powed = make_float3(math.pow(c.x, invGamma), math.pow(c.x, invGamma), math.pow(c.x, invGamma))
+    powed = make_float3(math.pow(c.x, invGamma), math.pow(c.y, invGamma), math.pow(c.z, invGamma))
     return make_float3(
         float32(12.92) * c.x if c.x < float32(0.0031308) else float32(1.055) * powed.x - float32(0.055),
         float32(12.92) * c.y if c.y < float32(0.0031308) else float32(1.055) * powed.y - float32(0.055),
@@ -1309,8 +1307,8 @@ def toSRGB(c):
 @cuda.jit(device=True)
 def quantizeUnsigned8Bits(x):
     x = clamp( x, float32(0.0), float32(1.0) )
-    N, Np1 = 1 << 8 - 1, 1 << 8
-    return uint8(min(uint8(x * float32(Np1)), uint8(N)))
+    N, Np1 = (1 << 8) - 1, 1 << 8
+    return uint8(min(uint32(x * float32(Np1)), uint32(N)))
 
 @cuda.jit(device=True)
 def make_color(c):
@@ -1330,10 +1328,10 @@ def computeRay(idx, dim, origin, direction):
     U = params.cam_u
     V = params.cam_v
     W = params.cam_w
-    d = types.float32(2.0) * make_float2(
-            types.float32(idx.x) / types.float32(dim.x),
-            types.float32(idx.y) / types.float32(dim.y)
-        ) - types.float32(1.0)
+    d = float32(2.0) * make_float2(
+            float32(idx.x) / float32(dim.x),
+            float32(idx.y) / float32(dim.y)
+        ) - float32(1.0)
 
     origin = params.cam_eye
     direction = normalize(d.x * U + d.y * V + W)
@@ -1351,16 +1349,16 @@ def __raygen__rg():
     computeRay(make_uint3(idx.x, idx.y, 0), dim, ray_origin, ray_direction)
 
     # Trace the ray against our scene hierarchy
-    p0 = cuda.local.array(1, types.int32)
-    p1 = cuda.local.array(1, types.int32)
-    p2 = cuda.local.array(1, types.int32)
+    p0 = cuda.local.array(1, int32)
+    p1 = cuda.local.array(1, int32)
+    p2 = cuda.local.array(1, int32)
     optix.Trace(
             params.handle,
             ray_origin,
             ray_direction,
-            types.float32(0.0),         # Min intersection distance
-            types.float32(1e16),        # Max intersection distance
-            types.float32(0.0),         # rayTime -- used for motion blur
+            float32(0.0),         # Min intersection distance
+            float32(1e16),        # Max intersection distance
+            float32(0.0),         # rayTime -- used for motion blur
             OptixVisibilityMask(255),   # Specify always visible
             # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
             uint32(OPTIX_RAY_FLAG_NONE),
@@ -1400,6 +1398,8 @@ def main():
     hitgroup_ptx = compile_numba(__closesthit__ch)
     
     # triangle_ptx = compile_cuda( "examples/triangle.cu" )
+
+    print(raygen_ptx)
 
     init_optix()
 
