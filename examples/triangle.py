@@ -112,6 +112,16 @@ class Float3(types.Type):
 float3 = Float3()
 
 
+# Float2 typing (forward declaration)
+
+class Float2(types.Type):
+    def __init__(self):
+        super().__init__(name="Float2")
+
+
+float2 = Float2()
+
+
 # Float3 data model
 
 @register_model(Float3)
@@ -213,7 +223,8 @@ def make_float3(x, y, z):
 @register
 class MakeFloat3(ConcreteTemplate):
     key = make_float3
-    cases = [signature(float3, types.float32, types.float32, types.float32)]
+    cases = [signature(float3, types.float32, types.float32, types.float32),
+    signature(float3, float2, types.float32)]
 
 
 register_global(make_float3, types.Function(MakeFloat3))
@@ -230,17 +241,19 @@ def lower_make_float3(context, builder, sig, args):
     return f3._getvalue()
 
 
+@lower(make_float3, float2, types.float32)
+def lower_make_float3(context, builder, sig, args):
+    f2 = cgutils.create_struct_proxy(float2)(context, builder, args[0])
+    f3 = cgutils.create_struct_proxy(float3)(context, builder)
+    f3.x = f2.x
+    f3.y = f2.y
+    f3.z = args[1]
+    return f3._getvalue()
+
+
 # float2
 # ------
 
-# Float2 typing
-
-class Float2(types.Type):
-    def __init__(self):
-        super().__init__(name="Float2")
-
-
-float2 = Float2()
 
 
 # Float2 data model
@@ -749,8 +762,8 @@ def lower_optix_getSbtDataPointer(context, builder, sig, args):
 def lower_optix_SetPayloadReg(reg):
     def lower_optix_SetPayload_impl(context, builder, sig, args):
         asm = ir.InlineAsm(ir.FunctionType(ir.VoidType(), [ir.IntType(32), ir.IntType(32)]),
-            f"call _optix_set_payload_{reg};",
-            "r, r")
+            f"call _optix_set_payload, ($0, $1);",
+            "r,r")
         builder.call(asm, [context.get_constant(types.int32, reg), args[0]])
     lower(getattr(optix, f"SetPayload_{reg}"), uint32)(lower_optix_SetPayload_impl)
 
@@ -764,8 +777,8 @@ def lower_optix_getTriangleBarycentrics(context, builder, sig, args):
     retty = ir.LiteralStructType([ir.FloatType(), ir.FloatType()])
     asm = ir.InlineAsm(
         ir.FunctionType(retty, []), 
-        "call (%0, %1), _optix_get_triangle_barycentrics, ();",
-        "=f, =f"
+        "call ($0, $1), _optix_get_triangle_barycentrics, ();",
+        "=f,=f"
     )
     ret = builder.call(asm, [])
     f2.x = builder.extract_value(ret, 0)
@@ -811,11 +824,11 @@ def lower_optix_Trace(context, builder, sig, args):
     retty = ir.LiteralStructType([ir.IntType(32)] * 32)
     asm = ir.InlineAsm(ir.FunctionType(retty, []),
     "call "
-    "(%0,%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,%15,%16,%17,%18,%19,%20,%21,%22,%23,%24,%25,%26,%27,%28,%"
-    "29,%30,%31),"
+    "($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,"
+    "$30,$31),"
     "_optix_trace_typed_32,"
-    "(%32,%33,%34,%35,%36,%37,%38,%39,%40,%41,%42,%43,%44,%45,%46,%47,%48,%49,%50,%51,%52,%53,%54,%55,%56,%57,%58,%"
-    "59,%60,%61,%62,%63,%64,%65,%66,%67,%68,%69,%70,%71,%72,%73,%74,%75,%76,%77,%78,%79,%80);",
+    "($32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,"
+    "$60,$61,$62,$63,$64,$65,$66,$67,$68,$69,$70,$71,$72,$73,$74,$75,$76,$77,$78,$79,$80);",
     "=r," * 32 + "r,l,f,f,f,f,f,f,f,f,f,r,r,r,r,r,r," + "r," * 31 + "r",
     side_effect=True
     )
@@ -1013,18 +1026,15 @@ def create_program_groups( ctx, raygen_module, miss_prog_module, hitgroup_module
     program_group_options = optix.ProgramGroupOptions()
 
     raygen_prog_group_desc                          = optix.ProgramGroupDesc()
-    raygen_prog_group_desc.kind = optix.OPTIX_PROGRAM_GROUP_KIND_RAYGEN
-    raygen_prog_group_desc.raygenModule             = module
+    raygen_prog_group_desc.raygenModule             = raygen_module
     raygen_prog_group_desc.raygenEntryFunctionName  = "__raygen__rg"
 
     miss_prog_group_desc                        = optix.ProgramGroupDesc()
-    miss_prog_group_desc.kind = optix.OPTIX_PROGRAM_GROUP_KIND_MISS
-    miss_prog_group_desc.missModule             = module
+    miss_prog_group_desc.missModule             = miss_prog_module
     miss_prog_group_desc.missEntryFunctionName  = "__miss__ms"
 
     hitgroup_prog_group_desc                             = optix.ProgramGroupDesc()
-    hitgroup_prog_group_desc.kind = optix.OPTIX_PROGRAM_GROUP_KIND_HITGROUP
-    hitgroup_prog_group_desc.hitgroupModuleCH            = module
+    hitgroup_prog_group_desc.hitgroupModuleCH            = hitgroup_module
     hitgroup_prog_group_desc.hitgroupEntryFunctionNameCH = "__closesthit__ch"
 
     prog_group, log = ctx.programGroupCreate(
@@ -1344,20 +1354,20 @@ def __raygen__rg():
     p0 = cuda.local.array(1, types.int32)
     p1 = cuda.local.array(1, types.int32)
     p2 = cuda.local.array(1, types.int32)
-    # optix.Trace(
-    #         params.handle,
-    #         ray_origin,
-    #         ray_direction,
-    #         types.float32(0.0),         # Min intersection distance
-    #         types.float32(1e16),        # Max intersection distance
-    #         types.float32(0.0),         # rayTime -- used for motion blur
-    #         OptixVisibilityMask(255),   # Specify always visible
-    #         # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
-    #         uint32(OPTIX_RAY_FLAG_NONE),
-    #         uint32(0),                          # SBT offset   -- See SBT discussion
-    #         uint32(1),                          # SBT stride   -- See SBT discussion
-    #         uint32(0),                          # missSBTIndex -- See SBT discussion
-    #         p0[0], p1[0], p2[0])
+    optix.Trace(
+            params.handle,
+            ray_origin,
+            ray_direction,
+            types.float32(0.0),         # Min intersection distance
+            types.float32(1e16),        # Max intersection distance
+            types.float32(0.0),         # rayTime -- used for motion blur
+            OptixVisibilityMask(255),   # Specify always visible
+            # OptixRayFlags.OPTIX_RAY_FLAG_NONE,
+            uint32(OPTIX_RAY_FLAG_NONE),
+            uint32(0),                          # SBT offset   -- See SBT discussion
+            uint32(1),                          # SBT stride   -- See SBT discussion
+            uint32(0),                          # missSBTIndex -- See SBT discussion
+            p0[0], p1[0], p2[0])
     result = make_float3(p0[0], p1[0], p2[0])
 
     # Record results in our output raster
