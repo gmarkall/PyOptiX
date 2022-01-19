@@ -406,6 +406,32 @@ def lower_make_uint3(context, builder, sig, args):
     return u4_3._getvalue()
 
 
+# Temporary Payload Parameter Pack
+class PayloadPack(types.Type):
+    def __init__(self):
+        super().__init__(name="PayloadPack")
+
+
+payload_pack = PayloadPack()
+
+
+# UInt3 data model
+
+@register_model(PayloadPack)
+class PayloadPackModel(models.StructModel):
+    def __init__(self, dmm, fe_type):
+        members = [
+            ('p0', types.uint32),
+            ('p1', types.uint32),
+            ('p2', types.uint32),
+        ]
+        super().__init__(dmm, fe_type, members)
+
+
+make_attribute_wrapper(PayloadPack, 'p0', 'p0')
+make_attribute_wrapper(PayloadPack, 'p1', 'p1')
+make_attribute_wrapper(PayloadPack, 'p2', 'p2')
+
 # OptiX typedefs and enums
 # -----------
 
@@ -672,7 +698,7 @@ class OptixGetTriangleBarycentrics(ConcreteTemplate):
 class OptixTrace(ConcreteTemplate):
     key = optix.Trace
     cases = [signature(
-        types.void,
+        payload_pack,
         OptixTraversableHandle,
         float3,
         float3,
@@ -684,9 +710,6 @@ class OptixTrace(ConcreteTemplate):
         uint32,
         uint32,
         uint32,
-        uint32, # payload register 0
-        uint32, # payload register 1
-        uint32, # payload register 2
     )]
 
 
@@ -800,25 +823,23 @@ def lower_optix_getTriangleBarycentrics(context, builder, sig, args):
         uint32,
         uint32,
         uint32,
-        uint32, # payload register 0
-        uint32, # payload register 1
-        uint32, # payload register 2
 )
 def lower_optix_Trace(context, builder, sig, args):
     # Only implements the version that accepts 3 payload registers
 
     (handle, rayOrigin, rayDirection, tmin, tmax, rayTime, visibilityMask,
-    rayFlags, SBToffset, SBTstride, missSBTIndex, p0, p1, p2) = args
+    rayFlags, SBToffset, SBTstride, missSBTIndex) = args
 
     rayOrigin = cgutils.create_struct_proxy(float3)(context, builder, rayOrigin)
     rayDirection = cgutils.create_struct_proxy(float3)(context, builder, rayDirection)
+    output = cgutils.create_struct_proxy(payload_pack)(context, builder)
 
     ox, oy, oz = rayOrigin.x, rayOrigin.y, rayOrigin.z
     dx, dy, dz = rayDirection.x, rayDirection.y, rayDirection.z
 
     n_payload_registers = 3
     n_stub_output_operands = 32 - n_payload_registers
-    outputs = ([p0, p1, p2] +
+    outputs = ([output.p0, output.p1, output.p2] +
                [builder.load(builder.alloca(ir.IntType(32)))
                 for _ in range(n_stub_output_operands)])
 
@@ -840,7 +861,11 @@ def lower_optix_Trace(context, builder, sig, args):
     args = [zero, handle, ox, oy, oz, dx, dy, dz, tmin, tmax, rayTime,
                        visibilityMask, rayFlags, SBToffset, SBTstride,
                        missSBTIndex, c_payload_registers] + outputs
-    return builder.call(asm, args)
+    ret = builder.call(asm, args)
+    output.p0 = builder.extract_value(ret, 0)
+    output.p1 = builder.extract_value(ret, 1)
+    output.p2 = builder.extract_value(ret, 2)
+    return output._getvalue()
 
 
 #-------------------------------------------------------------------------------
@@ -1319,15 +1344,16 @@ def make_color(c):
 
 @cuda.jit(device=True)
 def setPayload(p):
-    optix.SetPayload_0(uint32(p.x))
-    optix.SetPayload_1(uint32(p.y))
-    optix.SetPayload_2(uint32(p.z))
+    optix.SetPayload_0(cuda.libdevice.float_as_int(p.x))
+    optix.SetPayload_1(cuda.libdevice.float_as_int(p.y))
+    optix.SetPayload_2(cuda.libdevice.float_as_int(p.z))
 
 @cuda.jit(device=True)
-def computeRay(idx, dim, origin, direction):
+def computeRay(idx, dim):
     U = params.cam_u
     V = params.cam_v
     W = params.cam_w
+    # Normalizing coordinates to [-1.0, 1.0]
     d = float32(2.0) * make_float2(
             float32(idx.x) / float32(dim.x),
             float32(idx.y) / float32(dim.y)
@@ -1335,6 +1361,7 @@ def computeRay(idx, dim, origin, direction):
 
     origin = params.cam_eye
     direction = normalize(d.x * U + d.y * V + W)
+    return origin, direction
 
 
 def __raygen__rg():
@@ -1344,15 +1371,10 @@ def __raygen__rg():
 
     # Map our launch idx to a screen location and create a ray from the camera
     # location through the screen
-    ray_origin = make_float3(float32(0.0), float32(0.0), float32(0.0))
-    ray_direction = make_float3(float32(0.0), float32(0.0), float32(0.0))
-    computeRay(make_uint3(idx.x, idx.y, 0), dim, ray_origin, ray_direction)
+    ray_origin, ray_direction = computeRay(make_uint3(idx.x, idx.y, 0), dim)
 
     # Trace the ray against our scene hierarchy
-    p0 = cuda.local.array(1, int32)
-    p1 = cuda.local.array(1, int32)
-    p2 = cuda.local.array(1, int32)
-    optix.Trace(
+    payload_pack = optix.Trace(
             params.handle,
             ray_origin,
             ray_direction,
@@ -1365,8 +1387,12 @@ def __raygen__rg():
             uint32(0),                          # SBT offset   -- See SBT discussion
             uint32(1),                          # SBT stride   -- See SBT discussion
             uint32(0),                          # missSBTIndex -- See SBT discussion
-            p0[0], p1[0], p2[0])
-    result = make_float3(p0[0], p1[0], p2[0])
+    )
+    result = make_float3(
+        cuda.libdevice.int_as_float(payload_pack.p0), 
+        cuda.libdevice.int_as_float(payload_pack.p1), 
+        cuda.libdevice.int_as_float(payload_pack.p2)
+    )
 
     # Record results in our output raster
     params.image[idx.y * params.image_width + idx.x] = make_color( result )
