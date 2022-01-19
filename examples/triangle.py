@@ -596,19 +596,37 @@ def type_miss_data_struct(context):
 @lower(MissDataStruct, sbt_data_pointer)
 def lower_miss_data_ctor(context, builder, sig, args):
     # Anyway to err if this ctor is not called inside __miss__* program?
+    # TODO: Optimize
     ptr = args[0]
     ptr = builder.bitcast(ptr,
                           context.get_value_type(miss_data_type).as_pointer())
-    miss_data = cgutils.create_struct_proxy(miss_data_type)(context, builder)
+
     bg_color_ptr = cgutils.gep_inbounds(builder, ptr, 0, 0)
 
     xptr = cgutils.gep_inbounds(builder, bg_color_ptr, 0, 0)
     yptr = cgutils.gep_inbounds(builder, bg_color_ptr, 0, 1)
     zptr = cgutils.gep_inbounds(builder, bg_color_ptr, 0, 2)
-    miss_data.bg_color.x = builder.load(xptr)
-    miss_data.bg_color.y = builder.load(yptr)
-    miss_data.bg_color.z = builder.load(zptr)
-    return miss_data._getvalue()
+
+    output_miss_data = cgutils.create_struct_proxy(miss_data_type)(context, builder)
+    output_bg_color_ptr = cgutils.gep_inbounds(builder, output_miss_data._getpointer(), 0, 0)
+    output_bg_color_x_ptr = cgutils.gep_inbounds(builder, output_bg_color_ptr, 0, 0)
+    output_bg_color_y_ptr = cgutils.gep_inbounds(builder, output_bg_color_ptr, 0, 1)
+    output_bg_color_z_ptr = cgutils.gep_inbounds(builder, output_bg_color_ptr, 0, 2)
+
+    x = builder.load(xptr)
+    y = builder.load(yptr)
+    z = builder.load(zptr)
+
+    builder.store(x, output_bg_color_x_ptr)
+    builder.store(y, output_bg_color_y_ptr)
+    builder.store(z, output_bg_color_z_ptr)
+    
+
+    # Doesn't seem to do what's expected?
+    # miss_data.bg_color.x = builder.load(xptr)
+    # miss_data.bg_color.y = builder.load(yptr)
+    # miss_data.bg_color.z = builder.load(zptr)
+    return output_miss_data._getvalue()
 
 
 # OptiX functions
@@ -826,6 +844,7 @@ def lower_optix_getTriangleBarycentrics(context, builder, sig, args):
 )
 def lower_optix_Trace(context, builder, sig, args):
     # Only implements the version that accepts 3 payload registers
+    # TODO: Optimize returns
 
     (handle, rayOrigin, rayDirection, tmin, tmax, rayTime, visibilityMask,
     rayFlags, SBToffset, SBTstride, missSBTIndex) = args
@@ -1425,7 +1444,7 @@ def main():
     
     # triangle_ptx = compile_cuda( "examples/triangle.cu" )
 
-    print(raygen_ptx)
+    print(miss_ptx)
 
     init_optix()
 
