@@ -1,0 +1,19 @@
+[flake8]
+exclude = __init__.py
+ignore =
+    # line break before binary operator
+    W503,
+    # whitespace before :
+    E203
+
+[pydocstyle]
+match = .*\.py
+match-dir = examples
+# In addition to numpy style, we additionally ignore:
+add-ignore =
+    # magic methods
+    D105,
+    # no docstring in __init__
+    D107,
+    # newlines before docstrings
+    D204
