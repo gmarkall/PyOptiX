@@ -9,13 +9,26 @@ import cupy as cp  # CUDA bindings
 import numpy as np  # Packing of structures in C-compatible format
 from numba import cuda, float32, int32, types, uint8, uint32
 from numba.core.extending import overload
-from numba.cuda.compiler import compile_cuda as numba_compile_cuda
 from numba.cuda import get_current_device
-
+from numba.cuda.compiler import compile_cuda as numba_compile_cuda
+from numba_support import (
+    OPTIX_RAY_FLAG_NONE,
+    Float3,
+    MissDataStruct,
+    OptixVisibilityMask,
+    float2,
+    float3,
+    make_float2,
+    make_float3,
+    make_uchar4,
+    make_uint3,
+    params,
+    uchar4,
+    uint3,
+)
 from PIL import Image, ImageOps  # Image IO
 
 import optix
-from numba_support import float2, float3, uchar4, uint3, make_float2, make_float3, make_uchar4, make_uint3, params, OptixVisibilityMask, Float3, OPTIX_RAY_FLAG_NONE, MissDataStruct
 
 # -------------------------------------------------------------------------------
 #
@@ -130,17 +143,42 @@ def create_accel(ctx):
     )
 
     global vertices
-    vertices = cp.array([-0.5, -0.5, 0.0, 0.5, -0.5, 0.0, 0.0, 0.5, 0.0], dtype="f4")
+    global indices
+    # fmt: off
+    vertices = cp.array(
+        [
+            -1.0, -1.0, 0,
+            1.0, -1.0, 0,
+            1.0, 1.0, 0,
+            -1.0, 1.0, 0,
+            0, 0, 2.0
+        ], dtype="f4"
+    )
+    indices = cp.array(
+        [
+            0, 1, 2,
+            0, 2, 3,
+            0, 1, 4,
+            1, 2, 4,
+            2, 3, 4,
+            3, 0, 4
+        ], dtype="uint32"
+    )
+    # fmt: on
 
-    triangle_input_flags = [optix.GEOMETRY_FLAG_NONE]
-    triangle_input = optix.BuildInputTriangleArray()
-    triangle_input.vertexFormat = optix.VERTEX_FORMAT_FLOAT3
-    triangle_input.numVertices = len(vertices)
-    triangle_input.vertexBuffers = [vertices.data.ptr]
-    triangle_input.flags = triangle_input_flags
-    triangle_input.numSbtRecords = 1
+    pyramid_input_flags = [optix.GEOMETRY_FLAG_NONE]
 
-    gas_buffer_sizes = ctx.accelComputeMemoryUsage([accel_options], [triangle_input])
+    pyramid_input = optix.BuildInputTriangleArray()
+    pyramid_input.vertexFormat = optix.VERTEX_FORMAT_FLOAT3
+    pyramid_input.numVertices = len(vertices)
+    pyramid_input.vertexBuffers = [vertices.data.ptr]
+    pyramid_input.indexFormat = optix.INDICES_FORMAT_UNSIGNED_INT3
+    pyramid_input.numIndexTriplets = len(indices) // 3
+    pyramid_input.indexBuffer = indices.data.ptr
+    pyramid_input.flags = pyramid_input_flags
+    pyramid_input.numSbtRecords = 1
+
+    gas_buffer_sizes = ctx.accelComputeMemoryUsage([accel_options], [pyramid_input])
 
     d_temp_buffer_gas = cp.cuda.alloc(gas_buffer_sizes.tempSizeInBytes)
     d_gas_output_buffer = cp.cuda.alloc(gas_buffer_sizes.outputSizeInBytes)
@@ -148,7 +186,7 @@ def create_accel(ctx):
     gas_handle = ctx.accelBuild(
         0,  # CUDA stream
         [accel_options],
-        [triangle_input],
+        [pyramid_input],
         d_temp_buffer_gas.ptr,
         gas_buffer_sizes.tempSizeInBytes,
         d_gas_output_buffer.ptr,
@@ -311,7 +349,7 @@ def create_sbt(prog_groups):
     return sbt
 
 
-def launch(pipeline, sbt, trav_handle):
+def launch(pipeline, sbt, trav_handle, cam):
     print("Launching ... ")
 
     pix_bytes = pix_width * pix_height * 4
@@ -320,22 +358,24 @@ def launch(pipeline, sbt, trav_handle):
     h_pix[0:pix_width, 0:pix_height] = [255, 128, 0, 255]
     d_pix = cp.array(h_pix)
 
+    cam_eye, cam_U, cam_V, cam_W = cam
+
     params = [
         ("u8", "image", d_pix.data.ptr),
         ("u4", "image_width", pix_width),
         ("u4", "image_height", pix_height),
-        ("f4", "cam_eye_x", 0),
-        ("f4", "cam_eye_y", 0),
-        ("f4", "cam_eye_z", 2.0),
-        ("f4", "cam_U_x", 1.10457),
-        ("f4", "cam_U_y", 0),
-        ("f4", "cam_U_z", 0),
-        ("f4", "cam_V_x", 0),
-        ("f4", "cam_V_y", 0.828427),
-        ("f4", "cam_V_z", 0),
-        ("f4", "cam_W_x", 0),
-        ("f4", "cam_W_y", 0),
-        ("f4", "cam_W_z", -2.0),
+        ("f4", "cam_eye_x", cam_eye[0]),
+        ("f4", "cam_eye_y", cam_eye[1]),
+        ("f4", "cam_eye_z", cam_eye[2]),
+        ("f4", "cam_U_x", cam_U[0]),
+        ("f4", "cam_U_y", cam_U[1]),
+        ("f4", "cam_U_z", cam_U[2]),
+        ("f4", "cam_V_x", cam_V[0]),
+        ("f4", "cam_V_y", cam_V[1]),
+        ("f4", "cam_V_z", cam_V[2]),
+        ("f4", "cam_W_x", cam_W[0]),
+        ("f4", "cam_W_y", cam_W[1]),
+        ("f4", "cam_W_z", cam_W[2]),
         ("u8", "trav_handle", trav_handle),
     ]
 
@@ -448,6 +488,7 @@ def dot(a, b):
 @overload(dot, target="cuda")
 def jit_dot(a, b):
     if isinstance(a, Float3) and isinstance(b, Float3):
+
         def dot_float3_impl(a, b):
             return a.x * b.x + a.y * b.y + a.z * b.z
 
@@ -575,12 +616,12 @@ def __closesthit__ch():
 
 # -------------------------------------------------------------------------------
 #
-# main
+# render
 #
 # -------------------------------------------------------------------------------
 
 
-def main():
+def render(cam, t):
     raygen_ptx = compile_numba(__raygen__rg)
     miss_ptx = compile_numba(__miss__ms)
     hitgroup_ptx = compile_numba(__closesthit__ch)
@@ -602,15 +643,42 @@ def main():
     )
     pipeline = create_pipeline(ctx, prog_groups, pipeline_options)
     sbt = create_sbt(prog_groups)
-    pix = launch(pipeline, sbt, gas_handle)
+    pix = launch(pipeline, sbt, gas_handle, cam)
 
     print("Total number of log messages: {}".format(logger.num_mssgs))
 
     pix = pix.reshape((pix_height, pix_width, 4))  # PIL expects [ y, x ] resolution
     img = ImageOps.flip(Image.fromarray(pix, "RGBA"))  # PIL expects y = 0 at bottom
-    img.save("pyramid.png")
+    img.save(f"output/pyramid_{t}.png")
     img.show()
 
 
+def lookat(eye, at, up):
+    W = at - eye
+    Wnorm = np.linalg.norm(W)
+    if np.allclose(Wnorm, 0.0):
+        raise ValueError("Target too close to eye.")
+    W = W / Wnorm
+    U = np.cross(W, up)
+    U = U / np.linalg.norm(U)
+    V = np.cross(U, W)
+    V = V / np.linalg.norm(V)
+    return U, V, W
+
+
+def polar2cart(r, theta):
+    return (r * math.cos(theta), r * math.sin(theta))
+
+
 if __name__ == "__main__":
-    main()
+
+    for t in range(0, 361, 6):
+        rad = math.radians(t)
+        cart = polar2cart(1.5, rad)
+        eye = np.array([*cart, 2.5])
+        at = np.array([0.0, 0.0, 0.0])
+        up = np.array([0.0, 0.0, 1.0])
+        U, V, W = lookat(eye, at, up)
+
+        # print(eye, U, V, W)
+        render((eye, U, V, W), t)
