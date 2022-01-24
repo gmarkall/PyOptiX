@@ -11,6 +11,7 @@ from numba import cuda, float32, int32, types, uint8, uint32
 from numba.core.extending import overload
 from numba.cuda import get_current_device
 from numba.cuda.compiler import compile_cuda as numba_compile_cuda
+from numba.cuda.libdevice import fast_powf, float_as_int, int_as_float
 from numba_support import (
     OPTIX_RAY_FLAG_NONE,
     Float3,
@@ -387,7 +388,7 @@ def launch(pipeline, sbt, trav_handle):
 # the arguments to the kernel must be provided, if there are any.
 
 
-def compile_numba(f, sig=(), debug=False):
+def compile_numba(f, sig=(), debug=False, lineinfo=False):
     # Based on numba.cuda.compile_ptx. We don't just use
     # compile_ptx_for_current_device because it generates a kernel with a
     # mangled name. For proceeding beyond this prototype, an option should be
@@ -395,7 +396,8 @@ def compile_numba(f, sig=(), debug=False):
 
     nvvm_options = {
         "debug": debug,
-        "fastmath": False,
+        "lineinfo": lineinfo,
+        "fastmath": True,
         "opt": 0 if debug else 3,
     }
 
@@ -430,7 +432,7 @@ def clamp(x, a, b):
     pass
 
 
-@overload(clamp, target="cuda")
+@overload(clamp, target="cuda", fast_math=True)
 def jit_clamp(x, a, b):
     if (
         isinstance(x, types.Float)
@@ -458,7 +460,7 @@ def dot(a, b):
     pass
 
 
-@overload(dot, target="cuda")
+@overload(dot, target="cuda", fast_math=True)
 def jit_dot(a, b):
     if isinstance(a, Float3) and isinstance(b, Float3):
 
@@ -468,7 +470,7 @@ def jit_dot(a, b):
         return dot_float3_impl
 
 
-@cuda.jit(device=True)
+@cuda.jit(device=True, fast_math=True)
 def normalize(v):
     invLen = float32(1.0) / math.sqrt(dot(v, v))
     return v * invLen
@@ -477,12 +479,15 @@ def normalize(v):
 # Helpers
 
 
-@cuda.jit(device=True)
+@cuda.jit(device=True, fast_math=True)
 def toSRGB(c):
     # Use float32 for constants
     invGamma = float32(1.0) / float32(2.4)
     powed = make_float3(
-        math.pow(c.x, invGamma), math.pow(c.y, invGamma), math.pow(c.z, invGamma)
+        # math.pow(c.x, invGamma), math.pow(c.y, invGamma), math.pow(c.z, invGamma)
+        fast_powf(c.x, invGamma),
+        fast_powf(c.y, invGamma),
+        fast_powf(c.z, invGamma),
     )
     return make_float3(
         float32(12.92) * c.x
@@ -497,14 +502,14 @@ def toSRGB(c):
     )
 
 
-@cuda.jit(device=True)
+@cuda.jit(device=True, fast_math=True)
 def quantizeUnsigned8Bits(x):
     x = clamp(x, float32(0.0), float32(1.0))
     N, Np1 = (1 << 8) - 1, 1 << 8
     return uint8(min(uint32(x * float32(Np1)), uint32(N)))
 
 
-@cuda.jit(device=True)
+@cuda.jit(device=True, fast_math=True)
 def make_color(c):
     srgb = toSRGB(clamp(c, float32(0.0), float32(1.0)))
     return make_uchar4(
@@ -518,14 +523,14 @@ def make_color(c):
 # ray functions
 
 
-@cuda.jit(device=True)
+@cuda.jit(device=True, fast_math=True)
 def setPayload(p):
-    optix.SetPayload_0(cuda.libdevice.float_as_int(p.x))
-    optix.SetPayload_1(cuda.libdevice.float_as_int(p.y))
-    optix.SetPayload_2(cuda.libdevice.float_as_int(p.z))
+    optix.SetPayload_0(float_as_int(p.x))
+    optix.SetPayload_1(float_as_int(p.y))
+    optix.SetPayload_2(float_as_int(p.z))
 
 
-@cuda.jit(device=True)
+@cuda.jit(device=True, fast_math=True)
 def computeRay(idx, dim):
     U = params.cam_u
     V = params.cam_v
@@ -565,9 +570,9 @@ def __raygen__rg():
         uint32(0),  # missSBTIndex -- See SBT discussion
     )
     result = make_float3(
-        cuda.libdevice.int_as_float(payload_pack.p0),
-        cuda.libdevice.int_as_float(payload_pack.p1),
-        cuda.libdevice.int_as_float(payload_pack.p2),
+        int_as_float(payload_pack.p0),
+        int_as_float(payload_pack.p1),
+        int_as_float(payload_pack.p2),
     )
 
     # Record results in our output raster
