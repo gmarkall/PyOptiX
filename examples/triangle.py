@@ -14,7 +14,6 @@ from numba.cuda.compiler import compile_cuda as numba_compile_cuda
 from numba.cuda.libdevice import fast_powf, float_as_int, int_as_float
 from numba_support import (
     OPTIX_RAY_FLAG_NONE,
-    Float3,
     MissDataStruct,
     OptixVisibilityMask,
     float2,
@@ -331,7 +330,6 @@ def launch(pipeline, sbt, trav_handle):
     pix_bytes = pix_width * pix_height * 4
 
     h_pix = np.zeros((pix_width, pix_height, 4), "B")
-    h_pix[0:pix_width, 0:pix_height] = [255, 128, 0, 255]
     d_pix = cp.array(h_pix)
 
     params = [
@@ -445,7 +443,7 @@ def jit_clamp(x, a, b):
 
         return clamp_float_impl
     elif (
-        isinstance(x, Float3)
+        isinstance(x, type(float3))
         and isinstance(a, types.Float)
         and isinstance(b, types.Float)
     ):
@@ -462,7 +460,7 @@ def dot(a, b):
 
 @overload(dot, target="cuda", fast_math=True)
 def jit_dot(a, b):
-    if isinstance(a, Float3) and isinstance(b, Float3):
+    if isinstance(a, type(float3)) and isinstance(b, type(float3)):
 
         def dot_float3_impl(a, b):
             return a.x * b.x + a.y * b.y + a.z * b.z

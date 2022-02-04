@@ -5,9 +5,10 @@
 # -------------------------------------------------------------------------------
 
 from operator import add, mul, sub
+from typing import List, Tuple
 
 from llvmlite import ir
-from numba import cuda, float32, int32, types, uint8, uint32
+from numba import cuda, float32, int32, types, uchar, uint8, uint32
 from numba.core import cgutils
 from numba.core.extending import (
     make_attribute_wrapper,
@@ -30,116 +31,134 @@ from numba.cuda.types import dim3
 
 import optix
 
-# UChar4
-# ------
 
-# Numba presently doesn't implement the UChar4 type (which is fairly standard
-# CUDA) so we provide some minimal support for it here.
+class VectorType(types.Type):
+    def __init__(self, name, base_type, attr_names):
+        self._base_type = base_type
+        self._attr_names = attr_names
+        super().__init__(name=name)
 
+    @property
+    def base_type(self):
+        return self._base_type
 
-# Prototype a function to construct a uchar4
+    @property
+    def attr_names(self):
+        return self._attr_names
 
-
-def make_uchar4(x, y, z, w):
-    pass
-
-
-# UChar4 typing
-
-
-class UChar4(types.Type):
-    def __init__(self):
-        super().__init__(name="UChar4")
+    @property
+    def num_elements(self):
+        return len(self._attr_names)
 
 
-uchar4 = UChar4()
+def make_vector_type(
+    name: str, base_type: types.Type, attr_names: List[str]
+) -> types.Type:
+    """Create a vector type.
+
+    Parameters
+    ----------
+    name: str
+        The name of the type.
+    base_type: numba.types.Type
+        The primitive type for each element in the vector.
+    attr_names: list of str
+        Name for each attribute.
+    """
+
+    class _VectorType(VectorType):
+        """Internal instantiation of VectorType."""
+
+        pass
+
+    class VectorTypeModel(models.StructModel):
+        def __init__(self, dmm, fe_type):
+            members = [(attr_name, base_type) for attr_name in attr_names]
+            super().__init__(dmm, fe_type, members)
+
+    vector_type = _VectorType(name, base_type, attr_names)
+    register_model(_VectorType)(VectorTypeModel)
+    for attr_name in attr_names:
+        make_attribute_wrapper(_VectorType, attr_name, attr_name)
+
+    return vector_type
 
 
-@register
-class MakeUChar4(ConcreteTemplate):
-    key = make_uchar4
-    cases = [signature(uchar4, types.uchar, types.uchar, types.uchar, types.uchar)]
+def make_vector_type_factory(
+    vector_type: types.Type, overloads: List[Tuple[types.Type]]
+):
+    """Make a factory function for ``vector_type``
+
+    Parameters
+    ----------
+    vector_type: VectorType
+        The type to create factory function for.
+    overloads: List of argument types tuples
+        A list containing different overloads of the factory function. Each
+        base type in the tuple should either be primitive type or VectorType.
+    """
+
+    def func():
+        pass
+
+    class FactoryTemplate(ConcreteTemplate):
+        key = func
+        cases = [signature(vector_type, *arglist) for arglist in overloads]
+
+    def make_lower_factory(fml_arg_list):
+        """Meta function to create a lowering for the factory function. Flattens
+        the arguments by converting vector_type into load instructions for each
+        of its attributes. Such as float2 -> float2.x, float2.y.
+        """
+
+        def lower_factory(context, builder, sig, actual_args):
+            # A list of elements to assign from
+            source_list = []
+            # Convert the list of argument types to a list of load IRs.
+            for argidx, fml_arg in enumerate(fml_arg_list):
+                if isinstance(fml_arg, VectorType):
+                    pxy = cgutils.create_struct_proxy(fml_arg)(
+                        context, builder, actual_args[argidx]
+                    )
+                    source_list += [getattr(pxy, attr) for attr in fml_arg.attr_names]
+                else:
+                    # assumed primitive type
+                    source_list.append(actual_args[argidx])
+
+            if len(source_list) != vector_type.num_elements:
+                raise numba.core.TypingError(
+                    f"Unmatched number of source elements ({len(source_list)}) "
+                    "and target elements ({vector_type.num_elements})."
+                )
+
+            typ = cgutils.create_struct_proxy(vector_type)(context, builder)
+
+            for attr_name, source in zip(vector_type.attr_names, source_list):
+                setattr(typ, attr_name, source)
+            return typ._getvalue()
+
+        return lower_factory
+
+    func.__name__ = f"make_{vector_type.name.lower()}"
+    register(FactoryTemplate)
+    register_global(func, types.Function(FactoryTemplate))
+    for arglist in overloads:
+        lower_factory = make_lower_factory(arglist)
+        lower(func, *arglist)(lower_factory)
+    return func
 
 
-register_global(make_uchar4, types.Function(MakeUChar4))
+# Register basic types
+uchar4 = make_vector_type("UChar4", uchar, ["x", "y", "z", "w"])
+float3 = make_vector_type("Float3", float32, ["x", "y", "z"])
+float2 = make_vector_type("Float2", float32, ["x", "y"])
+uint3 = make_vector_type("UInt3", uint32, ["x", "y", "z"])
 
-
-# UChar4 data model
-
-
-@register_model(UChar4)
-class UChar4Model(models.StructModel):
-    def __init__(self, dmm, fe_type):
-        members = [
-            ("x", types.uchar),
-            ("y", types.uchar),
-            ("z", types.uchar),
-            ("w", types.uchar),
-        ]
-        super().__init__(dmm, fe_type, members)
-
-
-make_attribute_wrapper(UChar4, "x", "x")
-make_attribute_wrapper(UChar4, "y", "y")
-make_attribute_wrapper(UChar4, "z", "z")
-make_attribute_wrapper(UChar4, "w", "w")
-
-
-# UChar4 lowering
-
-
-@lower(make_uchar4, types.uchar, types.uchar, types.uchar, types.uchar)
-def lower_make_uchar4(context, builder, sig, args):
-    uc4 = cgutils.create_struct_proxy(uchar4)(context, builder)
-    uc4.x = args[0]
-    uc4.y = args[1]
-    uc4.z = args[2]
-    uc4.w = args[3]
-    return uc4._getvalue()
-
-
-# float3
-# ------
-
-# Float3 typing
-
-
-class Float3(types.Type):
-    def __init__(self):
-        super().__init__(name="Float3")
-
-
-float3 = Float3()
-
-
-# Float2 typing (forward declaration)
-
-
-class Float2(types.Type):
-    def __init__(self):
-        super().__init__(name="Float2")
-
-
-float2 = Float2()
-
-
-# Float3 data model
-
-
-@register_model(Float3)
-class Float3Model(models.StructModel):
-    def __init__(self, dmm, fe_type):
-        members = [
-            ("x", types.float32),
-            ("y", types.float32),
-            ("z", types.float32),
-        ]
-        super().__init__(dmm, fe_type, members)
-
-
-make_attribute_wrapper(Float3, "x", "x")
-make_attribute_wrapper(Float3, "y", "y")
-make_attribute_wrapper(Float3, "z", "z")
+# Register factory functions
+make_uchar4 = make_vector_type_factory(uchar4, [(uchar,) * 4])
+make_float3 = make_vector_type_factory(float3, [(float32,) * 3, (float2, float32)])
+make_float2 = make_vector_type_factory(float2, [(float32,) * 2])
+make_uint3 = make_vector_type_factory(uint3, [(uint32,) * 3])
 
 
 def lower_float3_ops(op):
@@ -220,68 +239,6 @@ def add_float3_float32_impl(context, builder, sig, args):
     return res._getvalue()
 
 
-# Prototype a function to construct a float3
-
-
-def make_float3(x, y, z):
-    pass
-
-
-@register
-class MakeFloat3(ConcreteTemplate):
-    key = make_float3
-    cases = [
-        signature(float3, types.float32, types.float32, types.float32),
-        signature(float3, float2, types.float32),
-    ]
-
-
-register_global(make_float3, types.Function(MakeFloat3))
-
-
-# make_float3 lowering
-
-
-@lower(make_float3, types.float32, types.float32, types.float32)
-def lower_make_float3(context, builder, sig, args):
-    f3 = cgutils.create_struct_proxy(float3)(context, builder)
-    f3.x = args[0]
-    f3.y = args[1]
-    f3.z = args[2]
-    return f3._getvalue()
-
-
-@lower(make_float3, float2, types.float32)
-def lower_make_float3(context, builder, sig, args):
-    f2 = cgutils.create_struct_proxy(float2)(context, builder, args[0])
-    f3 = cgutils.create_struct_proxy(float3)(context, builder)
-    f3.x = f2.x
-    f3.y = f2.y
-    f3.z = args[1]
-    return f3._getvalue()
-
-
-# float2
-# ------
-
-
-# Float2 data model
-
-
-@register_model(Float2)
-class Float2Model(models.StructModel):
-    def __init__(self, dmm, fe_type):
-        members = [
-            ("x", types.float32),
-            ("y", types.float32),
-        ]
-        super().__init__(dmm, fe_type, members)
-
-
-make_attribute_wrapper(Float2, "x", "x")
-make_attribute_wrapper(Float2, "y", "y")
-
-
 def lower_float2_ops(op):
     class Float2_op_template(ConcreteTemplate):
         key = op
@@ -333,93 +290,6 @@ def lower_float2_ops(op):
 
 lower_float2_ops(mul)
 lower_float2_ops(sub)
-
-
-# Prototype a function to construct a float2
-
-
-def make_float2(x, y):
-    pass
-
-
-@register
-class MakeFloat2(ConcreteTemplate):
-    key = make_float2
-    cases = [signature(float2, types.float32, types.float32)]
-
-
-register_global(make_float2, types.Function(MakeFloat2))
-
-
-# make_float2 lowering
-
-
-@lower(make_float2, types.float32, types.float32)
-def lower_make_float2(context, builder, sig, args):
-    f2 = cgutils.create_struct_proxy(float2)(context, builder)
-    f2.x = args[0]
-    f2.y = args[1]
-    return f2._getvalue()
-
-
-# uint3
-# ------
-
-
-class UInt3(types.Type):
-    def __init__(self):
-        super().__init__(name="UInt3")
-
-
-uint3 = UInt3()
-
-
-# UInt3 data model
-
-
-@register_model(UInt3)
-class UInt3Model(models.StructModel):
-    def __init__(self, dmm, fe_type):
-        members = [
-            ("x", types.uint32),
-            ("y", types.uint32),
-            ("z", types.uint32),
-        ]
-        super().__init__(dmm, fe_type, members)
-
-
-make_attribute_wrapper(UInt3, "x", "x")
-make_attribute_wrapper(UInt3, "y", "y")
-make_attribute_wrapper(UInt3, "z", "z")
-
-
-# Prototype a function to construct a uint3
-
-
-def make_uint3(x, y, z):
-    pass
-
-
-@register
-class MakeUInt3(ConcreteTemplate):
-    key = make_uint3
-    cases = [signature(uint3, types.uint32, types.uint32, types.uint32)]
-
-
-register_global(make_uint3, types.Function(MakeUInt3))
-
-
-# make_uint3 lowering
-
-
-@lower(make_uint3, types.uint32, types.uint32, types.uint32)
-def lower_make_uint3(context, builder, sig, args):
-    # u4 = uint32
-    u4_3 = cgutils.create_struct_proxy(uint3)(context, builder)
-    u4_3.x = args[0]
-    u4_3.y = args[1]
-    u4_3.z = args[2]
-    return u4_3._getvalue()
 
 
 # Temporary Payload Parameter Pack
@@ -902,7 +772,7 @@ def lower_optix_getTriangleBarycentrics(context, builder, sig, args):
 )
 def lower_optix_Trace(context, builder, sig, args):
     # Only implements the version that accepts 3 payload registers
-    # TODO: Optimize returns, adapt to 0-8 payload registers.
+    # TODO: Optimize returns, adapt to 0-32 payload registers.
 
     (
         handle,
