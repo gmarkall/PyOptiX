@@ -131,11 +131,11 @@ def make_vector_type_factory(
                     "and target elements ({vector_type.num_elements})."
                 )
 
-            typ = cgutils.create_struct_proxy(vector_type)(context, builder)
+            out = cgutils.create_struct_proxy(vector_type)(context, builder)
 
             for attr_name, source in zip(vector_type.attr_names, source_list):
-                setattr(typ, attr_name, source)
-            return typ._getvalue()
+                setattr(out, attr_name, source)
+            return out._getvalue()
 
         return lower_factory
 
@@ -146,6 +146,61 @@ def make_vector_type_factory(
         lower_factory = make_lower_factory(arglist)
         lower(func, *arglist)(lower_factory)
     return func
+
+
+def lower_vector_type_ops(
+    op, vector_type: VectorType, overloads: List[Tuple[types.Type]]
+):
+    class Vector_op_template(ConcreteTemplate):
+        key = op
+        cases = [signature(vector_type, *arglist) for arglist in overloads]
+
+    def make_lower_op(fml_arg_list):
+        def op_impl(context, builder, sig, actual_args):
+            def _make_load_IR(typ, actual_arg):
+                if isinstance(typ, VectorType):
+                    pxy = cgutils.create_struct_proxy(typ)(context, builder, actual_arg)
+                    oprands = [getattr(pxy, attr) for attr in typ.attr_names]
+                else:
+                    # Assumed primitive type, broadcast
+                    oprands = [actual_arg for _ in range(vector_type.num_elements)]
+                return oprands
+
+            def element_wise_op(lhs, rhs, res, attr):
+                setattr(
+                    res,
+                    attr,
+                    context.compile_internal(
+                        builder,
+                        lambda x, y: op(x, y),
+                        signature(types.float32, types.float32, types.float32),
+                        (lhs, rhs),
+                    ),
+                )
+
+            lhs_typ, rhs_typ = fml_arg_list
+            # Construct a list of load IRs
+            lhs = _make_load_IR(lhs_typ, actual_args[0])
+            rhs = _make_load_IR(rhs_typ, actual_args[1])
+
+            if not len(lhs) == len(rhs) == vector_type.num_elements:
+                raise numba.core.TypingError(
+                    f"Unmatched number of lhs elements ({len(lhs)}), rhs elements ({len(rhs)}) "
+                    "and target elements ({vector_type.num_elements})."
+                )
+
+            out = cgutils.create_struct_proxy(vector_type)(context, builder)
+            for attr, l, r in zip(vector_type.attr_names, lhs, rhs):
+                element_wise_op(l, r, out, attr)
+
+            return out._getvalue()
+
+        return op_impl
+
+    register_global(op, types.Function(Vector_op_template))
+    for arglist in overloads:
+        impl = make_lower_op(arglist)
+        lower(op, *arglist)(impl)
 
 
 # Register basic types
@@ -160,137 +215,21 @@ make_float3 = make_vector_type_factory(float3, [(float32,) * 3, (float2, float32
 make_float2 = make_vector_type_factory(float2, [(float32,) * 2])
 make_uint3 = make_vector_type_factory(uint3, [(uint32,) * 3])
 
-
-def lower_float3_ops(op):
-    class Float3_op_template(ConcreteTemplate):
-        key = op
-        cases = [
-            signature(float3, float3, float3),
-            signature(float3, types.float32, float3),
-            signature(float3, float3, types.float32),
-        ]
-
-    def float3_op_impl(context, builder, sig, args):
-        def op_attr(lhs, rhs, res, attr):
-            setattr(
-                res,
-                attr,
-                context.compile_internal(
-                    builder,
-                    lambda x, y: op(x, y),
-                    signature(types.float32, types.float32, types.float32),
-                    (getattr(lhs, attr), getattr(rhs, attr)),
-                ),
-            )
-
-        arg0, arg1 = args
-
-        if isinstance(sig.args[0], types.Float):
-            lf3 = cgutils.create_struct_proxy(float3)(context, builder)
-            lf3.x = arg0
-            lf3.y = arg0
-            lf3.z = arg0
-        else:
-            lf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[0])
-
-        if isinstance(sig.args[1], types.Float):
-            rf3 = cgutils.create_struct_proxy(float3)(context, builder)
-            rf3.x = arg1
-            rf3.y = arg1
-            rf3.z = arg1
-        else:
-            rf3 = cgutils.create_struct_proxy(float3)(context, builder, value=args[1])
-
-        res = cgutils.create_struct_proxy(float3)(context, builder)
-        op_attr(lf3, rf3, res, "x")
-        op_attr(lf3, rf3, res, "y")
-        op_attr(lf3, rf3, res, "z")
-        return res._getvalue()
-
-    register_global(op, types.Function(Float3_op_template))
-    lower(op, float3, float3)(float3_op_impl)
-    lower(op, types.float32, float3)(float3_op_impl)
-    lower(op, float3, types.float32)(float3_op_impl)
-
-
-lower_float3_ops(mul)
-lower_float3_ops(add)
-
-
-@lower(add, float32, float3)
-def add_float32_float3_impl(context, builder, sig, args):
-    s = args[0]
-    rhs = cgutils.create_struct_proxy(float3)(context, builder, args[1])
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fadd(s, rhs.x)
-    res.y = builder.fadd(s, rhs.y)
-    res.z = builder.fadd(s, rhs.z)
-    return res._getvalue()
-
-
-@lower(add, float3, float32)
-def add_float3_float32_impl(context, builder, sig, args):
-    lhs = cgutils.create_struct_proxy(float3)(context, builder, args[0])
-    s = args[1]
-    res = cgutils.create_struct_proxy(float3)(context, builder)
-    res.x = builder.fadd(lhs.x, s)
-    res.y = builder.fadd(lhs.y, s)
-    res.z = builder.fadd(lhs.z, s)
-    return res._getvalue()
-
-
-def lower_float2_ops(op):
-    class Float2_op_template(ConcreteTemplate):
-        key = op
-        cases = [
-            signature(float2, float2, float2),
-            signature(float2, types.float32, float2),
-            signature(float2, float2, types.float32),
-        ]
-
-    def float2_op_impl(context, builder, sig, args):
-        def op_attr(lhs, rhs, res, attr):
-            setattr(
-                res,
-                attr,
-                context.compile_internal(
-                    builder,
-                    lambda x, y: op(x, y),
-                    signature(types.float32, types.float32, types.float32),
-                    (getattr(lhs, attr), getattr(rhs, attr)),
-                ),
-            )
-
-        arg0, arg1 = args
-
-        if isinstance(sig.args[0], types.Float):
-            lf2 = cgutils.create_struct_proxy(float2)(context, builder)
-            lf2.x = arg0
-            lf2.y = arg0
-        else:
-            lf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[0])
-
-        if isinstance(sig.args[1], types.Float):
-            rf2 = cgutils.create_struct_proxy(float2)(context, builder)
-            rf2.x = arg1
-            rf2.y = arg1
-        else:
-            rf2 = cgutils.create_struct_proxy(float2)(context, builder, value=args[1])
-
-        res = cgutils.create_struct_proxy(float2)(context, builder)
-        op_attr(lf2, rf2, res, "x")
-        op_attr(lf2, rf2, res, "y")
-        return res._getvalue()
-
-    register_global(op, types.Function(Float2_op_template))
-    lower(op, float2, float2)(float2_op_impl)
-    lower(op, types.Float, float2)(float2_op_impl)
-    lower(op, float2, types.Float)(float2_op_impl)
-
-
-lower_float2_ops(mul)
-lower_float2_ops(sub)
-
+# Lower Vector Type Ops
+## float3
+lower_vector_type_ops(
+    add, float3, [(float3, float3), (float32, float3), (float3, float32)]
+)
+lower_vector_type_ops(
+    mul, float3, [(float3, float3), (float32, float3), (float3, float32)]
+)
+## float2
+lower_vector_type_ops(
+    mul, float2, [(float2, float2), (float32, float2), (float2, float32)]
+)
+lower_vector_type_ops(
+    sub, float2, [(float2, float2), (float32, float2), (float2, float32)]
+)
 
 # Temporary Payload Parameter Pack
 class PayloadPack(types.Type):
