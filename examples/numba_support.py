@@ -148,11 +148,27 @@ def make_vector_type_factory(
     return func
 
 
-def lower_vector_type_ops(
-    op, vector_type: VectorType, overloads: List[Tuple[types.Type]]
+def lower_vector_type_binops(
+    binop, vector_type: VectorType, overloads: List[Tuple[types.Type]]
 ):
+    """Lower ops for ``vector_type``
+
+    Parameters
+    ----------
+    binop: operation
+        The binop to lower
+    vector_type: VectorType
+        The type to lower op for.
+    overloads: List of argument types tuples
+        A list containing different overloads of the binop. Expected to be either
+            - vector_type x vector_type
+            - primitive_type x vector_type
+            - vector_type x primitive_type.
+        In case one of the oprand is primitive_type, the operation is broadcasted.
+    """
+    # Should we assume the above are the only possible types?
     class Vector_op_template(ConcreteTemplate):
-        key = op
+        key = binop
         cases = [signature(vector_type, *arglist) for arglist in overloads]
 
     def make_lower_op(fml_arg_list):
@@ -172,7 +188,7 @@ def lower_vector_type_ops(
                     attr,
                     context.compile_internal(
                         builder,
-                        lambda x, y: op(x, y),
+                        lambda x, y: binop(x, y),
                         signature(types.float32, types.float32, types.float32),
                         (lhs, rhs),
                     ),
@@ -197,10 +213,10 @@ def lower_vector_type_ops(
 
         return op_impl
 
-    register_global(op, types.Function(Vector_op_template))
+    register_global(binop, types.Function(Vector_op_template))
     for arglist in overloads:
         impl = make_lower_op(arglist)
-        lower(op, *arglist)(impl)
+        lower(binop, *arglist)(impl)
 
 
 # Register basic types
@@ -217,17 +233,17 @@ make_uint3 = make_vector_type_factory(uint3, [(uint32,) * 3])
 
 # Lower Vector Type Ops
 ## float3
-lower_vector_type_ops(
+lower_vector_type_binops(
     add, float3, [(float3, float3), (float32, float3), (float3, float32)]
 )
-lower_vector_type_ops(
+lower_vector_type_binops(
     mul, float3, [(float3, float3), (float32, float3), (float3, float32)]
 )
 ## float2
-lower_vector_type_ops(
+lower_vector_type_binops(
     mul, float2, [(float2, float2), (float32, float2), (float2, float32)]
 )
-lower_vector_type_ops(
+lower_vector_type_binops(
     sub, float2, [(float2, float2), (float32, float2), (float2, float32)]
 )
 
