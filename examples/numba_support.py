@@ -151,7 +151,7 @@ def make_vector_type_factory(
 def lower_vector_type_binops(
     binop, vector_type: VectorType, overloads: List[Tuple[types.Type]]
 ):
-    """Lower ops for ``vector_type``
+    """Lower binops for ``vector_type``
 
     Parameters
     ----------
@@ -166,7 +166,7 @@ def lower_vector_type_binops(
             - vector_type x primitive_type.
         In case one of the oprand is primitive_type, the operation is broadcasted.
     """
-    # Should we assume the above are the only possible types?
+    # Should we assume the above are the only possible cases?
     class Vector_op_template(ConcreteTemplate):
         key = binop
         cases = [signature(vector_type, *arglist) for arglist in overloads]
