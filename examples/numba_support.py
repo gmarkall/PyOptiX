@@ -6,6 +6,7 @@
 
 from operator import add, mul, sub
 from typing import List, Tuple
+from enum import IntEnum
 
 from llvmlite import ir
 from numba import cuda, float32, int32, types, uchar, uint8, uint32
@@ -283,17 +284,16 @@ OptixTraversableHandle = types.Integer(
 )
 
 
-OPTIX_RAY_FLAG_NONE = 0
-# class OptixRayFlags(Enum):
-#     OPTIX_RAY_FLAG_NONE = 0
-#     OPTIX_RAY_FLAG_DISABLE_ANYHIT = 1 << 0
-#     OPTIX_RAY_FLAG_ENFORCE_ANYHIT = 1 << 1
-#     OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT = 1 << 2
-#     OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT = 1 << 3,
-#     OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES = 1 << 4
-#     OPTIX_RAY_FLAG_CULL_FRONT_FACING_TRIANGLES = 1 << 5
-#     OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT = 1 << 6
-#     OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT = 1 << 7
+class OptixRayFlags(IntEnum):
+    OPTIX_RAY_FLAG_NONE = 0
+    OPTIX_RAY_FLAG_DISABLE_ANYHIT = 1 << 0
+    OPTIX_RAY_FLAG_ENFORCE_ANYHIT = 1 << 1
+    OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT = 1 << 2
+    OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT = 1 << 3,
+    OPTIX_RAY_FLAG_CULL_BACK_FACING_TRIANGLES = 1 << 4
+    OPTIX_RAY_FLAG_CULL_FRONT_FACING_TRIANGLES = 1 << 5
+    OPTIX_RAY_FLAG_CULL_DISABLED_ANYHIT = 1 << 6
+    OPTIX_RAY_FLAG_CULL_ENFORCED_ANYHIT = 1 << 7
 
 
 # OptiX types
