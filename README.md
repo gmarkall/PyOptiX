@@ -45,32 +45,35 @@ pip3 install --global-option build --global-option --debug .
 The example can be run from the examples directory with:
 
 ```
-python examples/hello.py
+python examples/<example_name>.py
 ```
 
-If the example runs successfully, a square will be rendered:
+If the example runs successfully, the example output will be rendered:
 
-![Example output](example_output.png)
+![Hello output](example_output.png)
+![Triangle output](triangle.png)
 
+Currently supported examples:
+- hello.py
+- triangle.py
 
 ## Explanation
 
 The Python implementation of the OptiX kernel and Numba extensions consists of
-three parts, all in [examples/hello.py](examples/hello.py):
+three parts:
 
-- Generic OptiX extensions for Numba - these implement things like
-  `GetSbtDataPointer`, etc., and are a sort of equivalent of the implementations
-  in the headers in the OptiX SDK.
-- The user's code, which I tried to write exactly as I'd expect a PyOptiX Python
-  user to write it - it contains declarations of the data structures as in
-  hello.h, and the kernel as in hello.cu - you can, in this example modify the
-  Python `__raygen__hello` function and see the changes reflected in the output
-  image.
+- Generic OptiX extention types for Numba. These include new types introduced in
+the OptiX SDK. They can be vector math types such as `float3`, `uint4` etc. Or it
+could be OptiX intrinsic methods such as `GetSbtDataPointer`. These are included in
+examples/numba_support.py. We intend to build more examples by reusing these extensions.
+- The second part are the user code. These are the ray tracing kernels that user
+of PyOptiX will write. They are in each of the example files, such as `hello.py`,
+`triangle.py`.
 - Code that should be generated from the user's code - these tell Numba how to
   support the data structures that the user declared, and how to create them
   from the `SbtDataPointer`, etc. I've handwritten these for this example, to
   understand what a code generator should generate, and because it would have
   taken too long and been too risky to write something to generate this off the
   bat. The correspondence between the user's code and the "hand-written
-  generated" code is mechanical - there is aclear path to write a generator for
+  generated" code is mechanical - there is a clear path to write a generator for
   these based on the example code.
